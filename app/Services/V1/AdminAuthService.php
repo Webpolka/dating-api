@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\Admin;
+namespace App\Services\V1;
 
 use App\Models\AdminLog;
 use App\Models\User;

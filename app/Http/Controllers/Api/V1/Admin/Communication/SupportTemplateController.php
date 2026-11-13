@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Support;
+namespace App\Http\Controllers\Api\V1\Admin\Communication;
 
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Support\StoreSupportTemplateCategoryRequest;
-use App\Http\Requests\Admin\V1\Support\StoreSupportTemplateRequest;
-use App\Http\Requests\Admin\V1\Support\UpdateSupportTemplateCategoryRequest;
-use App\Http\Requests\Admin\V1\Support\UpdateSupportTemplateRequest;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Communication\StoreSupportTemplateCategoryRequest;
+use App\Http\Requests\Api\V1\Admin\Communication\StoreSupportTemplateRequest;
+use App\Http\Requests\Api\V1\Admin\Communication\UpdateSupportTemplateCategoryRequest;
+use App\Http\Requests\Api\V1\Admin\Communication\UpdateSupportTemplateRequest;
 use App\Models\AdminLog;
 use App\Models\SupportTemplate;
 use App\Models\SupportTemplateCategory;

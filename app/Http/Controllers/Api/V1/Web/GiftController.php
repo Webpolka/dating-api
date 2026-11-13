@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
-use App\Actions\Api\SendGiftAction;
+use App\Actions\V1\Web\SendGiftAction;
 use App\Http\Controllers\Controller;
 use App\Models\Gift;
 use App\Models\User;
-use App\Http\Requests\V1\SendGiftRequest;
+use App\Http\Requests\Api\V1\Web\SendGiftRequest;
 use Illuminate\Http\Request;
 
 class GiftController extends Controller

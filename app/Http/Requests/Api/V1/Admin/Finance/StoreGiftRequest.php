@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Content;
+namespace App\Http\Requests\Api\V1\Admin\Finance;
 
-use App\Enums\GiftCategory;
+use App\Enums\V1\GiftCategory;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum as EnumRule;

@@ -1,19 +1,19 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Finance;
+namespace App\Http\Controllers\Api\V1\Admin\Finance;
 
 
-use App\Enums\RefundReason;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Finance\RefundTransactionRequest;
-use App\Jobs\ProcessRefundJob;
-use App\Jobs\ProcessSyncJob;
+use App\Enums\V1\RefundReason;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Finance\RefundTransactionRequest;
+use App\Jobs\V1\Admin\Finance\ProcessRefundJob;
+use App\Jobs\V1\Admin\Finance\ProcessSyncJob;
 use App\Models\AdminLog;
 use App\Models\Transaction;
 use App\Models\UserSubscription;
 use App\Models\SubscriptionPlan;
-use App\Notifications\PaymentSuccessful;
-use App\Notifications\PaymentFailed;
+use App\Notifications\V1\PaymentSuccessful;
+use App\Notifications\V1\PaymentFailed;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -147,7 +147,7 @@ class TransactionController extends AdminController
      * Защита от двойного клика: Redis lock на 60 сек с ключом
      * 'transaction-sync-{id}'. Если лок занят — значит sync уже идёт.
      *
-     * @see \App\Jobs\ProcessSyncJob
+     * @see \App\Jobs\V1\Admin\Finance\ProcessSyncJob
      */
     public function sync(Request $request, $id): JsonResponse
     {

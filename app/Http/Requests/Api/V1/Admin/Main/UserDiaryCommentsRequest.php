@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Users;
+namespace App\Http\Requests\Api\V1\Admin\Main;
 
 /**
  * Параметры для таба «Комм. дневников» пользователя.

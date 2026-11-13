@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Content;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Content\BroadcastRequest;
-use App\Http\Requests\Admin\V1\Content\BulkDestroyBroadcastRequest;
-use App\Jobs\SendBroadcastJob;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\System\BroadcastRequest;
+use App\Http\Requests\Api\V1\Admin\System\BulkDestroyBroadcastRequest;
+use App\Jobs\V1\Admin\System\SendBroadcastJob;
 use App\Models\AdminLog;
 use App\Models\Broadcast;
 use App\Models\User;

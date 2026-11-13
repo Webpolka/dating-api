@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Support;
+namespace App\Support\V1;
 
 /**
  * Лёгкий парсер User-Agent без внешних зависимостей.

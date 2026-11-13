@@ -2,7 +2,7 @@
 
 namespace App\Actions\V1\Admin\Communication;
 
-use App\Events\SupportChatUnarchived;
+use App\Events\V1\SupportChatUnarchived;
 use App\Models\AdminLog;
 use App\Models\Chat;
 use App\Models\ChatParticipant;

@@ -1,13 +1,13 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
-use App\Enums\DiaryStatus;
+use App\Enums\V1\DiaryStatus;
 use App\Models\AdminLog;
 use App\Models\Diary;
 use App\Models\DiaryRubric;
 use App\Models\User;
-use App\Notifications\DiaryModerated;
+use App\Notifications\V1\DiaryModerated;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;

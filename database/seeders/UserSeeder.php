@@ -8,7 +8,7 @@ use App\Models\UserPreference;
 use App\Models\UserBalance;
 use App\Models\Album;
 use App\Models\Photo;
-use App\Enums\DatingGoal;
+use App\Enums\V1\DatingGoal;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;

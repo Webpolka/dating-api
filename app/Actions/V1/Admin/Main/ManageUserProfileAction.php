@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Actions\Admin\Users;
+namespace App\Actions\V1\Admin\Main;
 
 use App\Models\AdminLog;
 use App\Models\User;
-use App\Notifications\ProfileFieldCleared;
+use App\Notifications\V1\ProfileFieldCleared;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 

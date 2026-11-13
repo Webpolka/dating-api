@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 
-use App\Actions\Admin\Moderation\ModerateDatingAction;
-use App\Http\Controllers\AdminController;
+use App\Actions\V1\Admin\Moderation\ModerateDatingAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\Swipe;
 use App\Models\UserMatch;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;

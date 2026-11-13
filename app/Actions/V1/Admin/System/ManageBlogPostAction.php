@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Actions\Admin\Content;
+namespace App\Actions\V1\Admin\System;
 
 use App\Models\AdminLog;
 use App\Models\BlogPost;

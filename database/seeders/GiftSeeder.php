@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Enums\GiftCategory;
+use App\Enums\V1\GiftCategory;
 use App\Models\Gift;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;

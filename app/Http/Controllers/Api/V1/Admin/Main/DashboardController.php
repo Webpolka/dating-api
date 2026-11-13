@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\System;
+namespace App\Http\Controllers\Api\V1\Admin\Main;
 
-use App\Http\Controllers\AdminController;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\AdminLog;
 use App\Models\Chat;
 use App\Models\Photo;

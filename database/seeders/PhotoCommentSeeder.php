@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Enums\CommentRejectReason;
+use App\Enums\V1\CommentRejectReason;
 use App\Models\Photo;
 use App\Models\User;
 use App\Models\PhotoComment;

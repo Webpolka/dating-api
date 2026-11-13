@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\Moderation;
 
 use App\Models\Photo;
 use Illuminate\Bus\Queueable;

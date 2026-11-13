@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Communication;
 
-use App\Actions\Admin\Moderation\ModerateStopWordAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Moderation\ApplyBulkStopWordRequest;
-use App\Http\Requests\Admin\V1\Moderation\StoreBulkStopWordsRequest;
-use App\Http\Requests\Admin\V1\Moderation\UpdateStopWordRequest;
+use App\Actions\V1\Admin\Moderation\ModerateStopWordAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Moderation\ApplyBulkStopWordRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\StoreBulkStopWordsRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\UpdateStopWordRequest;
 use App\Models\StopWord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

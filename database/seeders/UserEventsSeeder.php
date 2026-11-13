@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Enums\UserEventType; 
+use App\Enums\V1\UserEventType; 
 use App\Models\User;
 use App\Models\UserEvent;
 use Illuminate\Database\Seeder;

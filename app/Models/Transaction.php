@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
-use App\Events\TransactionRefunded;
+use App\Events\V1\TransactionRefunded;
 
 class Transaction extends Model
 {

@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\V1\FeedSearchRequest;
+use App\Http\Requests\Api\V1\Web\FeedSearchRequest;
 use App\Models\User;
-use App\Services\UserSearchService;
+use App\Services\V1\UserSearchService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;

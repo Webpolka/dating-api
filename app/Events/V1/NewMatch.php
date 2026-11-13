@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Events;
+namespace App\Events\V1;
 
 use App\Models\UserMatch;
 use Illuminate\Broadcasting\Channel;

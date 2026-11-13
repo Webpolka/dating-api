@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Security;
 
-use App\Actions\Admin\Users\ToggleUserBanAction;
+use App\Actions\V1\Admin\Main\ToggleUserBanAction;
 use App\Models\AdminLog;
 use App\Models\Chat;
 use App\Models\FraudAlert;

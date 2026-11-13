@@ -1,36 +1,36 @@
 <?php
 
-use App\Http\Controllers\Admin\V1\Auth\AuthController;
-use App\Http\Controllers\Admin\V1\System\DashboardController;
-use App\Http\Controllers\Admin\V1\System\StaffController;
-use App\Http\Controllers\Admin\V1\System\LogController;
-use App\Http\Controllers\Admin\V1\System\SystemController;
-use App\Http\Controllers\Admin\V1\System\SettingController;
-use App\Http\Controllers\Admin\V1\Content\PageController;
+use App\Http\Controllers\Api\V1\Admin\Auth\AuthController;
+use App\Http\Controllers\Api\V1\Admin\Main\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\System\StaffController;
+use App\Http\Controllers\Api\V1\Admin\System\LogController;
+use App\Http\Controllers\Api\V1\Admin\SystemController;
+use App\Http\Controllers\Api\V1\Admin\System\SettingController;
+use App\Http\Controllers\Api\V1\Admin\System\PageController;
 
-use App\Http\Controllers\Admin\V1\System\MediaController;
-use App\Http\Controllers\Admin\V1\Content\BlogCategoryController;
-use App\Http\Controllers\Admin\V1\Content\BlogPostController;
-use App\Http\Controllers\Admin\V1\System\GeoIPLocationController;
-use App\Http\Controllers\Admin\V1\System\AdminLogController;
-use App\Http\Controllers\Admin\V1\Content\BroadcastController;
-use App\Http\Controllers\Admin\V1\Moderation\FraudAlertController;
-use App\Http\Controllers\Admin\V1\Moderation\BlockSignalController;
-use App\Http\Controllers\Admin\V1\Moderation\StopWordController;
-use App\Http\Controllers\Admin\V1\Support\ChatController;
-use App\Http\Controllers\Admin\V1\Support\SupportChatController;
-use App\Http\Controllers\Admin\V1\Support\SupportTemplateController;
-use App\Http\Controllers\Admin\V1\Content\GiftController;
-use App\Http\Controllers\Admin\V1\Finance\SubscriptionPlanController;
-use App\Http\Controllers\Admin\V1\Finance\TransactionController;
-use App\Http\Controllers\Admin\V1\Moderation\PhotoController;
-use App\Http\Controllers\Admin\V1\Moderation\PhotoCommentController;
-use App\Http\Controllers\Admin\V1\Moderation\DatingController;
-use App\Http\Controllers\Admin\V1\Moderation\ReportController;
-use App\Http\Controllers\Admin\V1\Moderation\DiaryController;
-use App\Http\Controllers\Admin\V1\Moderation\DiaryCommentController;
-use App\Http\Controllers\Admin\V1\Users\UserController;
-use App\Http\Controllers\Admin\V1\Users\UserListingsController;
+use App\Http\Controllers\Api\V1\Admin\System\MediaController;
+use App\Http\Controllers\Api\V1\Admin\System\BlogCategoryController;
+use App\Http\Controllers\Api\V1\Admin\System\BlogPostController;
+use App\Http\Controllers\Api\V1\Admin\System\GeoIPLocationController;
+use App\Http\Controllers\Api\V1\Admin\System\AdminLogController;
+use App\Http\Controllers\Api\V1\Admin\System\BroadcastController;
+use App\Http\Controllers\Api\V1\Admin\Security\FraudAlertController;
+use App\Http\Controllers\Api\V1\Admin\Security\BlockSignalController;
+use App\Http\Controllers\Api\V1\Admin\Communication\StopWordController;
+use App\Http\Controllers\Api\V1\Admin\Communication\ChatController;
+use App\Http\Controllers\Api\V1\Admin\Communication\SupportChatController;
+use App\Http\Controllers\Api\V1\Admin\Communication\SupportTemplateController;
+use App\Http\Controllers\Api\V1\Admin\Finance\GiftController;
+use App\Http\Controllers\Api\V1\Admin\Finance\SubscriptionPlanController;
+use App\Http\Controllers\Api\V1\Admin\Finance\TransactionController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\PhotoController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\PhotoCommentController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\DatingController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\ReportController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\DiaryController;
+use App\Http\Controllers\Api\V1\Admin\Moderation\DiaryCommentController;
+use App\Http\Controllers\Api\V1\Admin\Main\UserController;
+use App\Http\Controllers\Api\V1\Admin\Main\UserListingsController;
 
 use Illuminate\Support\Facades\Route;
 

@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Observers;
+namespace App\Observers\V1;
 
 use App\Models\UserSubscription;
 use App\Models\User;
-use App\Jobs\SendSubscribeExpiredNotification;
+use App\Jobs\V1\Admin\Finance\SendSubscribeExpiredNotification;
 use Illuminate\Support\Facades\Log; 
 
 class UserSubscriptionObserver

@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Finance;
+namespace App\Http\Controllers\Api\V1\Admin\Finance;
 
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Finance\StoreSubscriptionPlanRequest;
-use App\Http\Requests\Admin\V1\Finance\UpdateSubscriptionPlanRequest;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Finance\StoreSubscriptionPlanRequest;
+use App\Http\Requests\Api\V1\Admin\Finance\UpdateSubscriptionPlanRequest;
 use App\Models\AdminLog;
 use App\Models\SubscriptionPlan;
 use Illuminate\Http\JsonResponse;

@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Notifications\VerifyEmail;
+use App\Notifications\V1\VerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -414,7 +414,7 @@ class User extends Authenticatable implements MustVerifyEmail
     public function getIsOnlineAttribute(): bool
     {
         try {
-            if (app(\App\Services\UserOnlineService::class)->isOnline($this->id)) {
+            if (app(\App\Services\V1\UserOnlineService::class)->isOnline($this->id)) {
                 return true;
             }
         } catch (\Throwable $e) {

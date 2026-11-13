@@ -1,16 +1,16 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
-use App\Actions\Admin\Users\ToggleUserBanAction;
-use App\Enums\ReportReason;
-use App\Enums\ReportResolution;
+use App\Actions\V1\Admin\Main\ToggleUserBanAction;
+use App\Enums\V1\ReportReason;
+use App\Enums\V1\ReportResolution;
 use App\Models\AdminLog;
 use App\Models\Photo;
 use App\Models\Report;
 use App\Models\User;
-use App\Notifications\ReportModerated;
-use App\Notifications\UserWarned;
+use App\Notifications\V1\ReportModerated;
+use App\Notifications\V1\UserWarned;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;

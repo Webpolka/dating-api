@@ -3,7 +3,7 @@
 namespace Tests\Feature\Admin;
 
 use App\Models\AdminLog;
-use App\Notifications\UserBanned;
+use App\Notifications\V1\UserBanned;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;

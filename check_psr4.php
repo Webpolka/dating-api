@@ -11,7 +11,29 @@
  *   php check_psr4.php status       — коротко: сколько файлов с расхождением
  *
  * ПЕРЕД fix / fix-all:  git add -A && git commit -m "backup before psr-4 fix"
- */
+ * 
+ * 
+ * # 0. ОБЯЗАТЕЛЬНО — бэкап!
+* git add -A && git commit -m "backup before psr-4 fix"
+*
+* # 1. (по желанию) глянь текущее состояние
+* php check_psr4.php status
+* #   Files scanned: 250
+* #   Files with mismatched namespace: 187
+*
+* # 2. Применить всё разом — namespace + use-ссылки
+* php check_psr4.php fix-all
+* 
+* # 3. Пересобери autoload и очисти кэш Laravel
+* composer dump-autoload
+* php artisan package:discover
+* php artisan optimize:clear
+* 
+* # 4. Проверка — должно быть OK
+* php check_psr4.php
+* #   OK: all namespaces comply with PSR-4.
+*
+*/
 
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "Run from CLI only.\n");

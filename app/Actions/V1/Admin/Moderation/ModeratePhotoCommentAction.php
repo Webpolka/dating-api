@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
-use App\Enums\CommentRejectReason;
+use App\Enums\V1\CommentRejectReason;
 use App\Models\AdminLog;
 use App\Models\Photo;
 use App\Models\PhotoComment;
 use App\Models\User;
-use App\Notifications\PhotoCommentModerated;
-use App\Services\Admin\AdminLogger;
-use App\Services\Moderation\CommentTreeService;
+use App\Notifications\V1\PhotoCommentModerated;
+use App\Services\V1\AdminLogger;
+use App\Services\V1\CommentTreeService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 

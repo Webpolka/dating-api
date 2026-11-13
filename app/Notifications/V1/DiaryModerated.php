@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Notifications;
+namespace App\Notifications\V1;
 
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -99,7 +99,7 @@ class DiaryModerated extends Notification implements ShouldQueue
     private function getReasonText(): string
     {
         if (!$this->reason) return 'Нарушение правил сервиса';
-        $enum = \App\Enums\DiaryRejectReason::tryFrom($this->reason);
+        $enum = \App\Enums\V1\DiaryRejectReason::tryFrom($this->reason);
         return $enum ? $enum->label() : 'Нарушение правил сервиса';
     }
 

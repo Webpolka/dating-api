@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Auth;
+namespace App\Http\Controllers\Api\V1\Admin\Auth;
 
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Auth\AdminLoginRequest;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Auth\AdminLoginRequest;
 use App\Models\AdminLog;
 use App\Models\User;
-use App\Services\Admin\AdminAuthService;
+use App\Services\V1\AdminAuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;

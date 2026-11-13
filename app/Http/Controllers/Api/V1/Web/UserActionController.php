@@ -1,13 +1,13 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserFavorite;
 use App\Models\UserBlock;
 use App\Models\Report;
-use App\Http\Requests\V1\ReportUserRequest;
+use App\Http\Requests\Api\V1\Web\ReportUserRequest;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 

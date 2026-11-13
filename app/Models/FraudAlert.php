@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
-use App\Enums\FraudAlertSeverity;
-use App\Enums\FraudAlertStatus;
-use App\Enums\FraudTriggerType;
+use App\Enums\V1\FraudAlertSeverity;
+use App\Enums\V1\FraudAlertStatus;
+use App\Enums\V1\FraudTriggerType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;

@@ -1,13 +1,13 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessSubscriptionPaymentGateway;
+use App\Jobs\V1\Admin\Finance\ProcessSubscriptionPaymentGateway;
 use App\Models\SubscriptionPlan;
 use App\Models\Transaction;
 use App\Models\UserSubscription;
-use App\Http\Requests\V1\SubscriptionPlansRequest;
+use App\Http\Requests\Api\V1\Web\SubscriptionPlansRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 

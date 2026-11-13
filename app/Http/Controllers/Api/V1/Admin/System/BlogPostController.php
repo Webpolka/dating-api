@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Content;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Actions\Admin\Content\ManageBlogPostAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Content\BlogPostRequest;
-use App\Http\Requests\Admin\V1\Content\BulkBlogPostRequest;
+use App\Actions\V1\Admin\System\ManageBlogPostAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\System\BlogPostRequest;
+use App\Http\Requests\Api\V1\Admin\System\BulkBlogPostRequest;
 use App\Models\BlogPost;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

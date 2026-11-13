@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Enums\UserBlockReason;
+use App\Enums\V1\UserBlockReason;
 use App\Models\User; 
 use App\Models\UserBlock;
 use Illuminate\Database\Seeder;

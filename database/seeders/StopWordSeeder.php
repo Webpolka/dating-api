@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Enums\StopWordAction;
-use App\Enums\StopWordCategory;
+use App\Enums\V1\StopWordAction;
+use App\Enums\V1\StopWordCategory;
 use App\Models\StopWord;
 use Illuminate\Database\Seeder;
 

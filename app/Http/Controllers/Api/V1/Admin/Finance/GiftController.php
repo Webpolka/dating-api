@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Content;
+namespace App\Http\Controllers\Api\V1\Admin\Finance;
 
-use App\Actions\Admin\Content\ManageGiftAction;
-use App\Enums\GiftCategory;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Content\StoreGiftRequest;
-use App\Http\Requests\Admin\V1\Content\UpdateGiftRequest;
+use App\Actions\V1\Admin\Finance\ManageGiftAction;
+use App\Enums\V1\GiftCategory;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Finance\StoreGiftRequest;
+use App\Http\Requests\Api\V1\Admin\Finance\UpdateGiftRequest;
 use App\Models\Gift;
 use App\Models\UserGift;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 
-use App\Actions\Admin\Moderation\ModerateReportAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Moderation\ResolveReportRequest;
-use App\Http\Requests\Admin\V1\Moderation\ToggleReportUserBanRequest;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Actions\V1\Admin\Moderation\ModerateReportAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Moderation\ResolveReportRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\ToggleReportUserBanRequest;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use App\Models\Photo;
 use App\Models\Report;
 use App\Models\User;

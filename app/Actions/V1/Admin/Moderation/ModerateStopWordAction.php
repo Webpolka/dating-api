@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
-use App\Enums\StopWordAction;
-use App\Enums\StopWordCategory;
+use App\Enums\V1\StopWordAction;
+use App\Enums\V1\StopWordCategory;
 use App\Models\AdminLog;
 use App\Models\StopWord;
 use App\Models\User;

@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Enums\ReportReason;
+use App\Enums\V1\ReportReason;
 use App\Models\Photo;
 use App\Models\Report;
 use App\Models\User;

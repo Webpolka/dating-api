@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\System;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Actions\Admin\System\ManageSettingsAction;
-use App\Http\Controllers\AdminController;
+use App\Actions\V1\Admin\System\ManageSettingsAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

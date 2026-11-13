@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Moderation;
+namespace App\Http\Requests\Api\V1\Admin\Moderation;
 
-use App\Enums\StopWordAction;
-use App\Enums\StopWordCategory;
+use App\Enums\V1\StopWordAction;
+use App\Enums\V1\StopWordCategory;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 

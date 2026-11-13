@@ -1,19 +1,19 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\UserProfile;
 use Illuminate\Support\Facades\Validator;
 
-use App\Http\Requests\V1\UpdateProfileInterestsRequest;
-use App\Http\Requests\V1\UpdateProfileMainRequest;
-use App\Http\Requests\V1\UpdateProfileHeadlineRequest;
-use App\Http\Requests\V1\UpdateProfileBioRequest;
-use App\Http\Requests\V1\UpdateProfileSelfPortraitRequest;
-use App\Http\Requests\V1\UpdateProfilePersonalInfoRequest;
-use App\Http\Requests\V1\UpdateProfileLookingForRequest;
-use App\Http\Requests\V1\UpdateProfilePreferencesRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileInterestsRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileMainRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileHeadlineRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileBioRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileSelfPortraitRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfilePersonalInfoRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfileLookingForRequest;
+use App\Http\Requests\Api\V1\Web\UpdateProfilePreferencesRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 

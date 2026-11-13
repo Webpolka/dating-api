@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Moderation;
+namespace App\Http\Requests\Api\V1\Admin\Moderation;
 
-use App\Enums\ReportResolution;
+use App\Enums\V1\ReportResolution;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**

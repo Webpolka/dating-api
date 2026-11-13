@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\V1;
 
 use App\Models\Interest;
 use App\Models\User;

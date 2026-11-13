@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\Finance;
 
 use App\Models\User;
-use App\Notifications\SubscriptionExpiredNotification;
+use App\Notifications\V1\SubscriptionExpiredNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

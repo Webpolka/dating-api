@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Swipe;
-use App\Http\Requests\V1\StoreSwipeRequest;
+use App\Http\Requests\Api\V1\Web\StoreSwipeRequest;
 
 class SwipeController extends Controller
 {

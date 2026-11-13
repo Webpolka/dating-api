@@ -1,18 +1,18 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 
-use App\Actions\Admin\Moderation\ManageDiaryRubricAction;
-use App\Actions\Admin\Moderation\ModerateDiaryAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Moderation\ApproveDiaryRequest;
-use App\Http\Requests\Admin\V1\Moderation\DestroyDiaryRubricRequest;
-use App\Http\Requests\Admin\V1\Moderation\RejectDiaryRequest;
-use App\Http\Requests\Admin\V1\Moderation\StoreDiaryRubricRequest;
-use App\Http\Requests\Admin\V1\Moderation\UnpublishDiaryRequest;
-use App\Http\Requests\Admin\V1\Moderation\UpdateDiaryRubricRequest;
-use App\Http\Requests\Admin\V1\Moderation\UpdateDiarySettingsRequest;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Actions\V1\Admin\Moderation\ManageDiaryRubricAction;
+use App\Actions\V1\Admin\Moderation\ModerateDiaryAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Moderation\ApproveDiaryRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\DestroyDiaryRubricRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\RejectDiaryRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\StoreDiaryRubricRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\UnpublishDiaryRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\UpdateDiaryRubricRequest;
+use App\Http\Requests\Api\V1\Admin\Moderation\UpdateDiarySettingsRequest;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use App\Models\Diary;
 use App\Models\DiaryRubric;
 use Illuminate\Http\JsonResponse;

@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\Finance;
 
 use App\Models\Transaction;
 use App\Models\UserSubscription;

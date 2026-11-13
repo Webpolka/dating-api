@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\Admin;
+namespace App\Services\V1;
 
 use App\Models\DiaryComment;
 use App\Models\PhotoComment;

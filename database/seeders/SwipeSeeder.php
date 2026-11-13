@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
  
-use App\Enums\SwipeType;
+use App\Enums\V1\SwipeType;
 use App\Models\User;
 use App\Models\Swipe;
 use App\Models\UserMatch;

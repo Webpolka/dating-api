@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessCreditPaymentGateway; 
+use App\Jobs\V1\Admin\Finance\ProcessCreditPaymentGateway; 
 use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;

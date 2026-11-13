@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Actions\Admin\Support;
+namespace App\Actions\V1\Admin\Communication;
 
 use App\Models\AdminLog;
 use App\Models\Chat;

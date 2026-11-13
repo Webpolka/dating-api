@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1;
 
 use App\Models\ChatParticipant;
-use App\Services\UnreadCounterService;
+use App\Services\V1\UnreadCounterService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

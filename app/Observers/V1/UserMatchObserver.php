@@ -1,13 +1,13 @@
 <?php
 
-namespace App\Observers;
+namespace App\Observers\V1;
 
-use App\Events\NewMatch;
+use App\Events\V1\NewMatch;
 use App\Models\Chat;
 use App\Models\User;
 use App\Models\UserMatch;
-use App\Notifications\NewMatchNotification;
-use App\Services\UserSearchService;
+use App\Notifications\V1\NewMatchNotification;
+use App\Services\V1\UserSearchService;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 

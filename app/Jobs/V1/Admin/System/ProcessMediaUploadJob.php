@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\System;
 
-use App\Enums\MediaCollection;
+use App\Enums\V1\MediaCollection;
 use App\Models\Media;
-use App\Services\MediaProcessorService;
+use App\Services\V1\MediaProcessorService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Users;
+namespace App\Http\Requests\Api\V1\Admin\Main;
 
-use App\Enums\BanReason;
+use App\Enums\V1\BanReason;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 

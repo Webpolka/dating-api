@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Moderation;
+namespace App\Http\Requests\Api\V1\Admin\Moderation;
 
-use App\Enums\PhotoRejectReason;
+use App\Enums\V1\PhotoRejectReason;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 

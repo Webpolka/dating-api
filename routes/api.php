@@ -1,15 +1,15 @@
 <?php
 
-use App\Http\Controllers\Api\V1\AuthController;
-use App\Http\Controllers\Api\V1\OnboardingController;
-use App\Http\Controllers\Api\V1\FeedController;
-use App\Http\Controllers\Api\V1\GeoController;
-use App\Http\Controllers\Api\V1\UserActionController;
-use App\Http\Controllers\Api\V1\UserProfileController;
-use App\Http\Controllers\Api\V1\SwipeController;
-use App\Http\Controllers\Api\V1\SubscriptionController;
-use App\Http\Controllers\Api\V1\EditProfileController;
-use App\Http\Controllers\Api\V1\InterestController;
+use App\Http\Controllers\Api\V1\Web\AuthController;
+use App\Http\Controllers\Api\V1\Web\OnboardingController;
+use App\Http\Controllers\Api\V1\Web\FeedController;
+use App\Http\Controllers\Api\V1\Web\GeoController;
+use App\Http\Controllers\Api\V1\Web\UserActionController;
+use App\Http\Controllers\Api\V1\Web\UserProfileController;
+use App\Http\Controllers\Api\V1\Web\SwipeController;
+use App\Http\Controllers\Api\V1\Web\SubscriptionController;
+use App\Http\Controllers\Api\V1\Web\EditProfileController;
+use App\Http\Controllers\Api\V1\Web\InterestController;
 
 
 use Illuminate\Support\Facades\Route;
@@ -104,15 +104,15 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
     Route::post('/subscriptions/renew', [SubscriptionController::class, 'renew']);
 
     // Подарки  
-    Route::get('/gifts', [\App\Http\Controllers\Api\V1\GiftController::class, 'index'])->name('api.gifts.index');    
-    Route::delete('/gifts/{giftId}', [\App\Http\Controllers\Api\V1\GiftController::class, 'destroy']);
+    Route::get('/gifts', [\App\Http\Controllers\Api\V1\Web\GiftController::class, 'index'])->name('api.gifts.index');    
+    Route::delete('/gifts/{giftId}', [\App\Http\Controllers\Api\V1\Web\GiftController::class, 'destroy']);
 
     // Биллинг    
-    Route::post('/billing/pay', [\App\Http\Controllers\Api\V1\BillingController::class, 'pay'])->name('api.billing.pay');    
-    Route::get('/billing/status/{transaction}', [\App\Http\Controllers\Api\V1\BillingController::class, 'status'])->name('api.billing.status');    
+    Route::post('/billing/pay', [\App\Http\Controllers\Api\V1\Web\BillingController::class, 'pay'])->name('api.billing.pay');    
+    Route::get('/billing/status/{transaction}', [\App\Http\Controllers\Api\V1\Web\BillingController::class, 'status'])->name('api.billing.status');    
 
     // Действия (лайк, избранное, блок, жалоба, чат)    
-    Route::post('/users/{user}/gift', [\App\Http\Controllers\Api\V1\GiftController::class, 'store'])->name('api.gift.store');
+    Route::post('/users/{user}/gift', [\App\Http\Controllers\Api\V1\Web\GiftController::class, 'store'])->name('api.gift.store');
     Route::post('/users/{user}/swipe', [SwipeController::class, 'store'])->name('api.user.swipe');
     Route::post('/users/{user}/favorite', [UserActionController::class, 'toggleFavorite'])->name('api.user.favorite');
     Route::post('/users/{user}/block', [UserActionController::class, 'toggleBlock'])->name('api.user.block');
@@ -147,7 +147,7 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
     // Важно про throttle: throttle:3,1 = 3 запроса в минуту (раз в 20 сек). Если frontend шлёт heartbeat каждые 30 сек — это оставляет запас. 
     // Если юзер попытается спамить — получит 429 Too Many Requests.
     // Rate limited: max 1 запрос в 20 секунд (frontend пингует каждые 30 сек)
-    Route::middleware(['throttle:3,1'])->post('/heartbeat', \App\Http\Controllers\Api\V1\HeartbeatController::class);
+    Route::middleware(['throttle:3,1'])->post('/heartbeat', \App\Http\Controllers\Api\V1\Web\HeartbeatController::class);
 });
 
 

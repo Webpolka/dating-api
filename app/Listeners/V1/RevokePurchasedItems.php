@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Listeners;
+namespace App\Listeners\V1;
 
-use App\Events\TransactionRefunded;
+use App\Events\V1\TransactionRefunded;
 use App\Models\UserSubscription;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;

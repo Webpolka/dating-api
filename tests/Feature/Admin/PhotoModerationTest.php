@@ -5,11 +5,11 @@ namespace Tests\Feature\Admin;
 use App\Models\AdminLog;
 use App\Models\Photo;
 use App\Models\User;
-use App\Notifications\PhotoModerated;
+use App\Notifications\V1\PhotoModerated;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
-use App\Jobs\ProcessApprovedPhoto;
+use App\Jobs\V1\Admin\Moderation\ProcessApprovedPhoto;
 use Tests\TestCase;
 
 /**

@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Security;
 
-use App\Actions\Admin\Moderation\ModerateBlockSignalAction;
-use App\Enums\UserBlockReason;
-use App\Http\Controllers\AdminController;
+use App\Actions\V1\Admin\Security\ModerateBlockSignalAction;
+use App\Enums\V1\UserBlockReason;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\User;
 use App\Models\UserBlock;
 use Illuminate\Http\JsonResponse;

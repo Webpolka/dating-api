@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\System;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Actions\Admin\System\ManageStaffAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\System\BatchUpdateRolesRequest;
-use App\Http\Requests\Admin\V1\System\PromoteUserRequest;
+use App\Actions\V1\Admin\System\ManageStaffAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\System\BatchUpdateRolesRequest;
+use App\Http\Requests\Api\V1\Admin\System\PromoteUserRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

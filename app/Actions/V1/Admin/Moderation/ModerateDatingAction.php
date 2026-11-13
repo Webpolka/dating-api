@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
 use App\Models\AdminLog;
 use App\Models\Swipe;

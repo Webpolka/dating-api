@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\System;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Enums\MediaCollection;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\System\BulkDeleteMediaRequest;
-use App\Http\Requests\Admin\V1\System\UploadMediaRequest;
-use App\Jobs\ProcessMediaUploadJob;
+use App\Enums\V1\MediaCollection;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\System\BulkDeleteMediaRequest;
+use App\Http\Requests\Api\V1\Admin\System\UploadMediaRequest;
+use App\Jobs\V1\Admin\System\ProcessMediaUploadJob;
 use App\Models\AdminLog;
 use App\Models\Media;
 use Illuminate\Http\JsonResponse;

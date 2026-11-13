@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Api;
 
-use App\Jobs\ProcessSubscriptionPaymentGateway;
+use App\Jobs\V1\Admin\Finance\ProcessSubscriptionPaymentGateway;
 use App\Models\SubscriptionPlan;
 use App\Models\Transaction;
 use App\Models\User;

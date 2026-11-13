@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\System;
 
-use App\Events\BroadcastStatusUpdated;
+use App\Events\V1\BroadcastStatusUpdated;
 use App\Models\Broadcast;
 use App\Models\User;
 use Illuminate\Bus\Queueable;

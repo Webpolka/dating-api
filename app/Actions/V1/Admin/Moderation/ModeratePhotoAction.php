@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Actions\Admin\Moderation;
+namespace App\Actions\V1\Admin\Moderation;
 
-use App\Jobs\ProcessApprovedPhoto;
+use App\Jobs\V1\Admin\Moderation\ProcessApprovedPhoto;
 use App\Models\AdminLog;
 use App\Models\Photo;
 use App\Models\User;
-use App\Notifications\PhotoModerated;
+use App\Notifications\V1\PhotoModerated;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 

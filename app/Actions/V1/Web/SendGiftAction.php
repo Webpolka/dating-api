@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Actions\Api;
+namespace App\Actions\V1\Web;
 
 use App\Models\Gift;
 use App\Models\User;

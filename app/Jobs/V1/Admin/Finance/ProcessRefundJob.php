@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\Finance;
 
-use App\Events\TransactionRefunded;
-use App\Events\TransactionRefundFailed;
+use App\Events\V1\TransactionRefunded;
+use App\Events\V1\TransactionRefundFailed;
 use App\Models\AdminLog;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Notifications\RefundProcessed;
-use App\Notifications\PaymentFailed;
-use App\Services\MockAcquiringService;
+use App\Notifications\V1\RefundProcessed;
+use App\Notifications\V1\PaymentFailed;
+use App\Services\V1\MockAcquiringService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

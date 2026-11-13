@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Console\Commands;
+namespace App\Console\Commands\V1;
 
 use App\Models\Broadcast;
 use Illuminate\Console\Command;

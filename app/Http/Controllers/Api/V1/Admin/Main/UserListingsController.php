@@ -1,18 +1,18 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Users;
+namespace App\Http\Controllers\Api\V1\Admin\Main;
 
-use App\Enums\GiftCategory;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Users\UserAuthLogsRequest;
-use App\Http\Requests\Admin\V1\Users\UserDatingRequest;
-use App\Http\Requests\Admin\V1\Users\UserDiariesRequest;
-use App\Http\Requests\Admin\V1\Users\UserDiaryCommentsRequest;
-use App\Http\Requests\Admin\V1\Users\UserGiftsRequest;
-use App\Http\Requests\Admin\V1\Users\UserListRequest;
-use App\Http\Requests\Admin\V1\Users\UserPhotoCommentsRequest;
-use App\Http\Requests\Admin\V1\Users\UserTransactionsRequest;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Enums\V1\GiftCategory;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Main\UserAuthLogsRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserDatingRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserDiariesRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserDiaryCommentsRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserGiftsRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserListRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserPhotoCommentsRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserTransactionsRequest;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use App\Models\AdminLog;
 use App\Models\Broadcast;
 use App\Models\Chat;

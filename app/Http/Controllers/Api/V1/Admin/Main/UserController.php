@@ -1,30 +1,30 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Users;
+namespace App\Http\Controllers\Api\V1\Admin\Main;
 
-use App\Actions\Admin\Users\DeleteUserAction;
-use App\Actions\Admin\Users\ToggleUserBanAction;
-use App\Actions\Admin\Users\ManageUserProfileAction;
-use App\Actions\Admin\Users\ManageUserSessionsAction;
-use App\Actions\Admin\Users\ManageUserBlocksAction;
+use App\Actions\V1\Admin\Main\DeleteUserAction;
+use App\Actions\V1\Admin\Main\ToggleUserBanAction;
+use App\Actions\V1\Admin\Main\ManageUserProfileAction;
+use App\Actions\V1\Admin\Main\ManageUserSessionsAction;
+use App\Actions\V1\Admin\Main\ManageUserBlocksAction;
 
-use App\Http\Resources\Admin\V1\Users\UserDetailResource;
-use App\Http\Resources\Admin\V1\Users\UserBadgeResource;
-use App\Http\Resources\Admin\V1\Users\PhotoResource;
+use App\Http\Resources\Api\V1\Admin\UserDetailResource;
+use App\Http\Resources\Api\V1\Admin\UserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\PhotoResource;
 
-use App\Enums\BanReason;
-use App\Enums\DeletionReason;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Users\BanUserRequest;
-use App\Http\Requests\Admin\V1\Users\ClearProfileFieldRequest;
-use App\Http\Requests\Admin\V1\Users\DeleteUserRequest;
-use App\Http\Requests\Admin\V1\Users\KillUserSessionRequest;
-use App\Http\Requests\Admin\V1\Users\UnblockUserBlockRequest;
-use App\Http\Requests\Admin\V1\Users\UserBlocksRequest;
-use App\Http\Requests\Admin\V1\Users\UserIndexRequest;
-use App\Http\Requests\Admin\V1\Users\UserListRequest;
-use App\Http\Requests\Admin\V1\Users\UserReportsRequest;
-use App\Http\Requests\Admin\V1\Users\UserPhotosRequest;
+use App\Enums\V1\BanReason;
+use App\Enums\V1\DeletionReason;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Main\BanUserRequest;
+use App\Http\Requests\Api\V1\Admin\Main\ClearProfileFieldRequest;
+use App\Http\Requests\Api\V1\Admin\Main\DeleteUserRequest;
+use App\Http\Requests\Api\V1\Admin\Main\KillUserSessionRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UnblockUserBlockRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserBlocksRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserIndexRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserListRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserReportsRequest;
+use App\Http\Requests\Api\V1\Admin\Main\UserPhotosRequest;
 use App\Models\User;
 use App\Models\Report;
 use App\Models\UserBlock;

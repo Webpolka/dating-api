@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Requests\Admin\V1\Finance;
+namespace App\Http\Requests\Api\V1\Admin\Finance;
 
-use App\Enums\RefundReason;
+use App\Enums\V1\RefundReason;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**

@@ -1,6 +1,6 @@
 <?php
 
-namespace App\DTO;
+namespace App\DTO\V1;
 
 /**
  * Результат проверки текста через ContentFilterService.

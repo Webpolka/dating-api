@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Console\Commands;
+namespace App\Console\Commands\V1;
 
 use App\Models\UserSubscription;
 use Illuminate\Console\Command;
@@ -34,7 +34,7 @@ class ProcessSubscriptions extends Command
             ->whereNull('expires_notified_at') // <--- КЛЮЧЕВАЯ ЗАЩИТА ОТ СПАМА! Если уже уведомляли - пропускаем
             ->chunkById(100, function ($subscriptions) use (&$notifyCount) {
                 foreach ($subscriptions as $subscription) {
-                    \App\Jobs\SendSubscribeExpiringNotification::dispatch($subscription);
+                    \App\Jobs\V1\Admin\Finance\SendSubscribeExpiringNotification::dispatch($subscription);
                     
                     // Сразу ставим метку, что уведомление отправлено
                     $subscription->update(['expires_notified_at' => now()]);

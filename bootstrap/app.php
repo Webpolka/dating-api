@@ -3,8 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use App\Http\Middleware\LoadUserRelations;
-use App\Http\Middleware\AdminRoleMiddleware;
+use App\Http\Middleware\V1\LoadUserRelations;
+use App\Http\Middleware\V1\AdminRoleMiddleware;
 use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -35,12 +35,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Добавляем наш middleware в API группу (в начало)
         $middleware->api(append: [
-            \App\Http\Middleware\UpdateOnlineStatus::class,
+            \App\Http\Middleware\V1\UpdateOnlineStatus::class,
         ]);
 
         // Также добавляем в web группу (на случай если есть web-роуты с auth)
         $middleware->web(append: [
-            \App\Http\Middleware\UpdateOnlineStatus::class,
+            \App\Http\Middleware\V1\UpdateOnlineStatus::class,
         ]);
 
         // регистрируем алиас для middleware

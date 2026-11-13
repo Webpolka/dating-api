@@ -1,19 +1,19 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Support;
+namespace App\Http\Controllers\Api\V1\Admin\Communication;
 
-use App\Events\SupportChatArchived;
-use App\Events\SupportChatRead;
-use App\Events\SupportChatUnarchived;
+use App\Events\V1\SupportChatArchived;
+use App\Events\V1\SupportChatRead;
+use App\Events\V1\SupportChatUnarchived;
 use App\Actions\Admin\Support\SendSupportChatMessageAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Support\SendSupportChatMessageRequest;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Communication\SendSupportChatMessageRequest;
 use App\Models\AdminLog;
 use App\Models\Chat;
 use App\Models\Message;
 use App\Models\SupportTemplate;
 use App\Models\User;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;

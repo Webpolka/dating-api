@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\System;
 
-use App\Events\BroadcastStatusUpdated;
+use App\Events\V1\BroadcastStatusUpdated;
 use App\Models\Broadcast;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
@@ -37,7 +37,7 @@ class SendBroadcastChunkJob implements ShouldQueue
 
         // Notification::send автоматически раскидает уведомления по очередям (ShouldQueue)
         try {
-            Notification::send($users, new \App\Notifications\BroadcastNotification(
+            Notification::send($users, new \App\Notifications\V1\BroadcastNotification(
                 broadcastId: $broadcast->id,
                 type: $broadcast->type,
                 title: $broadcast->title,

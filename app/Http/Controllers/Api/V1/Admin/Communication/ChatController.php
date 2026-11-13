@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Support;
+namespace App\Http\Controllers\Api\V1\Admin\Communication;
 
-use App\Actions\Admin\Support\ToggleChatLockAction;
-use App\Http\Controllers\AdminController;
+use App\Actions\V1\Admin\Communication\ToggleChatLockAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\Chat;
 use App\Models\User;
-use App\Http\Resources\Admin\V1\Users\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;

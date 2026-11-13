@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Enums\CommentRejectReason;
-use App\Enums\DiaryStatus;
+use App\Enums\V1\CommentRejectReason;
+use App\Enums\V1\DiaryStatus;
 use App\Models\Diary;
 use App\Models\DiaryComment;
 use App\Models\DiaryCommentLike;

@@ -51,7 +51,7 @@ class ChatParticipant extends Model
     public function markAsRead(): void
     {
         // 1. Сбрасываем счётчик в Redis (мгновенно, 0.1ms)
-        app(\App\Services\UnreadCounterService::class)->resetChat($this->user_id, $this->chat_id);
+        app(\App\Services\V1\UnreadCounterService::class)->resetChat($this->user_id, $this->chat_id);
 
         // 2. Обновляем last_read_at в БД (быстро, раз в 5 минут через throttling)
         if (!$this->last_read_at || $this->last_read_at->lt(now()->subMinutes(5))) {
@@ -67,7 +67,7 @@ class ChatParticipant extends Model
     {
         // Пытаемся получить из Redis (primary source)
         try {
-            $redisValue = app(\App\Services\UnreadCounterService::class)
+            $redisValue = app(\App\Services\V1\UnreadCounterService::class)
                 ->getChatCount($this->user_id, $this->chat_id);
 
             // Если в Redis есть значение — возвращаем его

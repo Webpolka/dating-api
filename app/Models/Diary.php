@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\DiaryStatus;
+use App\Enums\V1\DiaryStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;

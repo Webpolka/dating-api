@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1;
+namespace App\Http\Controllers\Api\V1\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
@@ -8,7 +8,7 @@ use App\Models\UserFavorite;
 use App\Models\UserBlock;
 use App\Models\Report;
 use App\Models\ProfileView;
-use App\Services\ProfileViewService;
+use App\Services\V1\ProfileViewService;
 use Illuminate\Http\Request;
 
 class UserProfileController extends Controller

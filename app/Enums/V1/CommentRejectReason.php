@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Enums;
+namespace App\Enums\V1;
 
 /**
  * Причины отклонения комментария (для фото и дневников — единый enum).

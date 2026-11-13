@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Actions\Admin\Users;
+namespace App\Actions\V1\Admin\Main;
 
 use App\Models\AdminLog;
 use App\Models\Photo;
 use App\Models\User;
-use App\Notifications\UserBanned;
+use App\Notifications\V1\UserBanned;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 

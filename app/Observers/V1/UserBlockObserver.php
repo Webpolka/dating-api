@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Observers;
+namespace App\Observers\V1;
 
 use App\Models\UserBlock;
-use App\Services\UserSearchService;
+use App\Services\V1\UserSearchService;
 use Illuminate\Support\Facades\Log;
 
 class UserBlockObserver

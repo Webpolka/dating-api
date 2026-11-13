@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Jobs\V1\Admin\Finance;
 
-use App\Events\TransactionSynced;
+use App\Events\V1\TransactionSynced;
 use App\Models\AdminLog;
 use App\Models\SubscriptionPlan;
 use App\Models\Transaction;
 use App\Models\UserSubscription;
-use App\Notifications\PaymentFailed;
-use App\Notifications\PaymentSuccessful;
-use App\Services\MockAcquiringService;
+use App\Notifications\V1\PaymentFailed;
+use App\Notifications\V1\PaymentSuccessful;
+use App\Services\V1\MockAcquiringService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

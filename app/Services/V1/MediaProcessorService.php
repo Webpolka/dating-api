@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\V1;
 
-use App\Enums\MediaCollection;
+use App\Enums\V1\MediaCollection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Intervention\Image\ImageManager;

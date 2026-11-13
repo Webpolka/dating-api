@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Content;
+namespace App\Http\Controllers\Api\V1\Admin\System;
 
-use App\Http\Controllers\AdminController;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\AdminLog;
 use App\Models\Page;
 use Illuminate\Http\JsonResponse;

@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\V1;
 
-use App\DTO\ContentFilterResult;
-use App\Enums\StopWordAction;
+use App\DTO\V1\ContentFilterResult;
+use App\Enums\V1\StopWordAction;
 use App\Models\StopWord;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;

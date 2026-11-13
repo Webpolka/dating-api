@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Console\Commands;
+namespace App\Console\Commands\V1;
 
-use App\Jobs\SendBroadcastJob;
+use App\Jobs\V1\Admin\System\SendBroadcastJob;
 use App\Models\Broadcast;
 use App\Models\AdminLog;
 use Illuminate\Console\Command;

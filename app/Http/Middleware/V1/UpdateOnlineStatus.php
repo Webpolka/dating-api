@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Middleware;
+namespace App\Http\Middleware\V1;
 
 use App\Models\User;
-use App\Services\UserOnlineService;
+use App\Services\V1\UserOnlineService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;

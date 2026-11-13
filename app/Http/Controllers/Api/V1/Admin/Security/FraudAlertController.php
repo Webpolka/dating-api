@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Security;
 
-use App\Actions\Admin\Moderation\ResolveFraudAlertAction;
-use App\Http\Controllers\AdminController;
+use App\Actions\V1\Admin\Security\ResolveFraudAlertAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Models\FraudAlert;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

@@ -1,20 +1,20 @@
 <?php
 
-namespace App\Observers;
+namespace App\Observers\V1;
 
-use App\Enums\FraudAlertSeverity;
-use App\Enums\FraudAlertStatus;
-use App\Enums\FraudTriggerType;
-use App\Events\ChatMessageReceived;
-use App\Events\NewMessage;
-use App\Events\SupportMessageReceived;
+use App\Enums\V1\FraudAlertSeverity;
+use App\Enums\V1\FraudAlertStatus;
+use App\Enums\V1\FraudTriggerType;
+use App\Events\V1\ChatMessageReceived;
+use App\Events\V1\NewMessage;
+use App\Events\V1\SupportMessageReceived;
 use App\Models\Chat;
 use App\Models\FraudAlert;
 use App\Models\Message;
 use App\Models\User;
-use App\Notifications\NewMessageNotification;
-use App\Services\ContentFilterService;
-use App\Services\UnreadCounterService;
+use App\Notifications\V1\NewMessageNotification;
+use App\Services\V1\ContentFilterService;
+use App\Services\V1\UnreadCounterService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 

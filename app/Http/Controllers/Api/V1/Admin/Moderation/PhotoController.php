@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Admin\V1\Moderation;
+namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 
-use App\Actions\Admin\Moderation\ModeratePhotoAction;
-use App\Http\Controllers\AdminController;
-use App\Http\Requests\Admin\V1\Moderation\RejectPhotoRequest;
+use App\Actions\V1\Admin\Moderation\ModeratePhotoAction;
+use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Requests\Api\V1\Admin\Moderation\RejectPhotoRequest;
 use App\Models\Photo;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;

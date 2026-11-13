@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use App\Enums\StopWordAction;
-use App\Enums\StopWordCategory;
+use App\Enums\V1\StopWordAction;
+use App\Enums\V1\StopWordCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
