@@ -1,0 +1,26 @@
+Media structure for project
+
+```sheme
+storage/app/public/
+├── avatars/
+│   ├── original/
+│   ├── medium/
+│   └── thumb/
+├── photos/
+│   ├── original/
+│   ├── medium/
+│   ├── thumb/
+│   └── private/
+├── messages/
+│   ├── images/
+│   ├── voice/
+│   └── videos/
+├── reports/
+├── verification/
+│   ├── photos/
+│   └── videos/
+├── banners/
+├── uploads/
+├── temp/
+└── private/
+```
