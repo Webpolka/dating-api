@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 use App\Actions\V1\Admin\Moderation\ModeratePhotoAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Moderation\RejectPhotoRequest;
+use App\Http\Resources\Api\V1\Admin\Moderation\PhotoModerationCardResource;
+use App\Http\Resources\Api\V1\Admin\Moderation\PhotoResource;
 use App\Models\Photo;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -14,17 +16,19 @@ use Illuminate\Http\Request;
  * Модерация фотографий.
  *
  * Архитектура:
- *  - Controller (HTTP-слой): валидация, форматирование ответа, форматирование данных
- *  - ModeratePhotoAction (бизнес-логика): меняет статусы, диспатчит Job, пишет логи, шлёт уведомления
+ *  - Controller: валидация, resolution модели + 404, форматирование ответа
+ *    через PhotoResource / PhotoModerationCardResource.
+ *  - ModeratePhotoAction: меняет статусы, диспатчит Job, пишет логи, шлёт уведомления.
  *
- * Action переиспользуемый — его же вызывают из Reports/жалоб. Логика в одном месте.
+ * Action переиспользуемый — его же вызывают из Reports/жалоб.
+ *
+ * Два режима index():
+ *  - queue: статус=pending без поиска → карточки юзеров с pending-фото.
+ *    Группировка по юзеру (withWhereHas photos pending + withCount).
+ *  - grid:  история или поиск → плоская сетка фото с фильтром по status.
  */
 class PhotoController extends AdminController
 {
-    // ============================================
-    // СПИСОК + СЧЁТЧИКИ
-    // ============================================
-
     public function index(Request $request): JsonResponse
     {
         $status = $request->string('status', 'pending')->toString();
@@ -53,7 +57,7 @@ class PhotoController extends AdminController
             }
         }
 
-        // РЕЖИМ ОЧЕРЕДИ: карточки юзеров с pending-фото
+        // === РЕЖИМ ОЧЕРЕДИ: карточки юзеров с pending-фото ===
         if ($status === 'pending' && !$isSearching) {
             $users = User::withTrashed()
                 ->withWhereHas('photos', fn($q) => $q->where('status', 'pending')->whereNull('deleted_at'))
@@ -66,7 +70,7 @@ class PhotoController extends AdminController
 
             return response()->json([
                 'mode'   => 'queue',
-                'data'   => $users->map(fn(User $u) => $this->formatUserCard($u)),
+                'data'   => PhotoModerationCardResource::collection($users->getCollection())->resolve($request),
                 'meta'   => [
                     'current_page' => $users->currentPage(),
                     'last_page'    => $users->lastPage(),
@@ -80,16 +84,14 @@ class PhotoController extends AdminController
             ]);
         }
 
-        // РЕЖИМ ИСТОРИИ: сетка фото
-        $query = Photo::withTrashed()->with([
-            'user' => function ($q) {
-                $q->withTrashed()
+        // === РЕЖИМ ИСТОРИИ: сетка фото ===
+        $query = Photo::withTrashed()
+            ->with([
+                'user' => fn($q) => $q->withTrashed()
                     ->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-                    ->with(['photos' => fn($sq) => $sq->select(['id', 'user_id', 'status', 'is_primary', 'path_thumb', 'path_medium', 'path_large', 'path_original'])
-                        ->orderByDesc('is_primary')->limit(1)]);
-            },
-            'album:id,name',
-        ])
+                    ->withAvatar(),
+                'album:id,name',
+            ])
             ->whereHas('user', fn($q) => $q->withTrashed()->excludeStaff());
 
         if ($status === 'quarantine') {
@@ -108,16 +110,14 @@ class PhotoController extends AdminController
             });
         }
 
-        if ($isIdSearch) {
-            $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-        }
-        $query->latest()->latest('id');
+        $query->when($isIdSearch, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
+            ->latest()->latest('id');
 
         $photos = $query->paginate($perPage, ['*'], 'page', $page);
 
         return response()->json([
             'mode'   => 'grid',
-            'data'   => $photos->map(fn(Photo $p) => $this->formatPhoto($p, withUser: true))->values(),
+            'data'   => PhotoResource::collection($photos->getCollection())->resolve($request),
             'meta'   => [
                 'current_page' => $photos->currentPage(),
                 'last_page'    => $photos->lastPage(),
@@ -143,42 +143,32 @@ class PhotoController extends AdminController
     public function approve(Request $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
         $photo = Photo::find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
         $action->approve($photo, $request->user());
 
-        return response()->json(['message' => 'Фото одобрено. Запущена обработка...']);
+        return $this->message('Фото одобрено. Запущена обработка...');
     }
 
     public function reject(RejectPhotoRequest $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
-        // Валидируем: причина должна быть ПОЛЬЗОВАТЕЛЬСКОЙ (не системной).
-        // file_missing/too_large/processing_error сюда не пройдут — их ставит только job'а.
-        $validated = $request->validated();
-
         $photo = Photo::find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
-        $action->reject($photo, $request->user(), $validated['reason']);
+        $action->reject($photo, $request->user(), $request->validated()['reason']);
 
-        return response()->json(['message' => 'Фото отклонено']);
+        return $this->message('Фото отклонено');
     }
 
     public function setPrimary(Request $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
         $photo = Photo::find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
         try {
             $result = $action->setPrimary($photo, $request->user());
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            return $this->message($e->getMessage(), 422);
         }
 
         return response()->json($result);
@@ -187,67 +177,59 @@ class PhotoController extends AdminController
     public function softDelete(Request $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
         $photo = Photo::find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
         $action->softDelete($photo, $request->user());
 
-        return response()->json(['message' => 'Фото перемещено в карантин']);
+        return $this->message('Фото перемещено в карантин');
     }
 
     public function restore(Request $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
         $photo = Photo::withTrashed()->find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
         $action->restore($photo, $request->user());
 
-        return response()->json(['message' => 'Фото восстановлено в очередь']);
+        return $this->message('Фото восстановлено в очередь');
     }
 
     public function destroy(Request $request, int $id, ModeratePhotoAction $action): JsonResponse
     {
         $photo = Photo::withTrashed()->find($id);
-        if (!$photo) {
-            return response()->json(['message' => 'Фото не найдено'], 404);
-        }
+        if (!$photo) return $this->notFound('Фото');
 
         $action->destroy($photo, $request->user());
 
-        return response()->json(['message' => 'Фото навсегда удалено']);
+        return $this->message('Фото навсегда удалено');
     }
 
     public function approveAllForUser(Request $request, int $userId, ModeratePhotoAction $action): JsonResponse
     {
         $user = User::find($userId);
-        if (!$user) {
-            return response()->json(['message' => 'Пользователь не найден'], 404);
-        }
+        if (!$user) return $this->notFound('Пользователь');
 
         $count = $action->approveAllForUser($user, $request->user());
 
-        return response()->json([
-            'count'   => $count,
-            'message' => $count > 0 ? "Одобрено {$count} фото" : 'Нет фото для одобрения',
-        ]);
+        return $this->message(
+            $count > 0 ? "Одобрено {$count} фото" : 'Нет фото для одобрения',
+            200,
+            ['count' => $count],
+        );
     }
 
     public function rejectAllForUser(Request $request, int $userId, ModeratePhotoAction $action): JsonResponse
     {
         $user = User::find($userId);
-        if (!$user) {
-            return response()->json(['message' => 'Пользователь не найден'], 404);
-        }
+        if (!$user) return $this->notFound('Пользователь');
 
         $count = $action->rejectAllForUser($user, $request->user());
 
-        return response()->json([
-            'count'   => $count,
-            'message' => $count > 0 ? "Отклонено {$count} фото" : 'Нет фото для отклонения',
-        ]);
+        return $this->message(
+            $count > 0 ? "Отклонено {$count} фото" : 'Нет фото для отклонения',
+            200,
+            ['count' => $count],
+        );
     }
 
     // ============================================
@@ -274,70 +256,4 @@ class PhotoController extends AdminController
             'quarantine' => (int) ($stats->quarantine ?? 0),
         ];
     }
-
-    private function formatUserCard(User $u): array
-    {
-        return [
-            'id'                   => $u->id,
-            'name'                 => $u->name,
-            'email'                => $u->email,
-            'avatar_url'           => $u->avatar_url,
-            'is_online'            => $u->is_online,
-            'status'               => $u->status,
-            'deleted_at'           => $u->deleted_at?->toIso8601String(),
-            'has_active_premium'   => $u->has_active_premium,
-            'has_active_vip'       => $u->has_active_vip,
-            'is_verified'          => $u->is_verified,
-            'pending_photos_count' => (int) $u->pending_photos_count,
-            'created_at'           => $u->created_at?->toIso8601String(),
-            'photos'               => $u->photos
-                ->map(fn(Photo $p) => $this->formatPhoto($p, withUser: false))
-                ->values()
-                ->all(),
-        ];
-    }
-
-    private function formatPhoto(Photo $p, bool $withUser = true): array
-    {
-        $data = [
-            'id'            => $p->id,
-            'user_id'       => $p->user_id,
-            'status'        => $p->status,
-            'is_primary'    => (bool) $p->is_primary,
-            'is_intimate'   => (bool) $p->is_intimate,
-            'type'          => $p->type,
-            'reject_reason' => $p->reject_reason,
-            'trashed'       => $p->trashed(),
-            'moderated_at'  => $p->moderated_at?->toIso8601String(),
-            'created_at'    => $p->created_at?->toIso8601String(),
-            'updated_at'    => $p->updated_at?->toIso8601String(),
-            'thumb_url'     => $p->thumb_url,
-            'medium_url'    => $p->medium_url,
-            'large_url'     => $p->large_url,
-            'original_url'  => $p->original_url,
-            'album'         => $p->album ? ['id' => $p->album->id, 'name' => $p->album->name] : null,
-        ];
-
-        if ($withUser) {
-            if ($p->user) {
-                $u = $p->user;
-                $data['user'] = [
-                    'id'                  => $u->id,
-                    'name'                => $u->name,
-                    'email'               => $u->email,
-                    'avatar_url'          => $u->avatar_url,
-                    'is_online'           => $u->is_online,
-                    'status'              => $u->status,
-                    'deleted_at'          => $u->deleted_at?->toIso8601String(),
-                    'has_active_premium'  => $u->has_active_premium,
-                    'has_active_vip'      => $u->has_active_vip,
-                    'is_verified'         => $u->is_verified,
-                ];
-            } else {
-                $data['user'] = null;
-            }
-        }
-
-        return $data;
-    }
-}
+} 

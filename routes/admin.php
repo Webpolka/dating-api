@@ -4,7 +4,7 @@ use App\Http\Controllers\Api\V1\Admin\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Admin\Main\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\System\StaffController;
 use App\Http\Controllers\Api\V1\Admin\System\LogController;
-use App\Http\Controllers\Api\V1\Admin\SystemController;
+use App\Http\Controllers\Api\V1\Admin\System\SystemController;
 use App\Http\Controllers\Api\V1\Admin\System\SettingController;
 use App\Http\Controllers\Api\V1\Admin\System\PageController;
 

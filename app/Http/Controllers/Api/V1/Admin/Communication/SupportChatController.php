@@ -2,18 +2,19 @@
 
 namespace App\Http\Controllers\Api\V1\Admin\Communication;
 
+use App\Actions\V1\Admin\Communication\SendSupportChatMessageAction;
 use App\Events\V1\SupportChatArchived;
 use App\Events\V1\SupportChatRead;
 use App\Events\V1\SupportChatUnarchived;
-use App\Actions\Admin\Support\SendSupportChatMessageAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Communication\SendSupportChatMessageRequest;
+use App\Http\Resources\Api\V1\Admin\Communication\ChatMessageResource;
+use App\Http\Resources\Api\V1\Admin\Communication\SupportChatResource;
 use App\Models\AdminLog;
 use App\Models\Chat;
 use App\Models\Message;
 use App\Models\SupportTemplate;
 use App\Models\User;
-use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -36,15 +37,30 @@ use Illuminate\Support\Facades\Cache;
  * В chat_participants для support-чатов хранится ТОЛЬКО юзер
  * (один участник). Админ — «виртуальный» участник через staff-роль.
  *
- * Юзеру нужен participant-record для:
- *   - unread_count (per-user, для notification юзеру)
- *   - is_hidden / is_muted (per-user preferences, если будут нужны)
+ * === ИСПОЛЬЗУЕМЫЕ ХЕЛПЕРЫ ИЗ AdminController ===
+ *  - $this->paginated()  — для list endpoint
+ *  - $this->message()    — для mutation responses
+ *  - $this->notFound()   — для 404
+ *
+ * === ИСПОЛЬЗУЕМЫЕ SCOPE'Ы ИЗ МОДЕЛЕЙ ===
+ *  - Chat::support()              — where type='support'
+ *  - User::withAvatar()           — eager-load аватара (вместо $avatarQuery closure)
+ *
+ * === КЭШ ===
+ *  - admin_support_stats     (60с) — счётчики для списка тикетов
+ *  - admin_sidebar_stats            — глобальный кэш сайдбара
+ *  - admin_support_templates (forever) — кэш шаблонов для чата поддержки
+ *  Инвалидация — через приватный invalidateStatsCache() (3 места → 1 метод).
  */
 class SupportChatController extends AdminController
 {
+    /**
+     * GET /api/admin/support-chats — список тикетов с фильтром и поиском.
+     *
+     * БЕЗ фильтра по participants — все staff видят все чаты.
+     */
     public function index(Request $request): JsonResponse
     {
-        $admin    = $request->user();
         $search   = mb_substr((string) $request->string('q', ''), 0, 100);
         $filter   = (string) $request->string('filter', 'unread');
         $perPage  = min(max((int) $request->integer('per_page', 20), 10), 100);
@@ -53,63 +69,41 @@ class SupportChatController extends AdminController
         $searchOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
         $isId           = $search !== '' && ctype_digit($search);
 
-        $avatarQuery = fn($q) => $q->select([
-            'id',
-            'user_id',
-            'is_primary',
-            'status',
-            'path_thumb',
-            'path_medium',
-            'path_large',
-            'path_original',
-        ])->orderByDesc('is_primary')->limit(1);
-
-        // Базовый запрос: все support-чаты.
-        // ВАЖНО: БЕЗ фильтра по participants — все staff видят все чаты.
-        $query = Chat::where('type', Chat::TYPE_SUPPORT);
-
-        // Фильтры по глобальному state чата (не per-admin).
-        // Partial indexes (chats_support_unread_idx / _active_idx / _archived_idx)
-        // покрывают каждый фильтр — IndexScan с last_message_at DESC.
-        $query->when($filter === 'archived', fn($q) => $q->where('is_archived', true))
+        $chats = Chat::support()
+            // Фильтры по глобальному state чата (не per-admin).
+            // Partial indexes (chats_support_unread_idx / _active_idx / _archived_idx)
+            // покрывают каждый фильтр — IndexScan с last_message_at DESC.
+            ->when($filter === 'archived', fn($q) => $q->where('is_archived', true))
             ->when($filter === 'active', fn($q) => $q
                 ->where('is_archived', false)
                 ->where('staff_unread_count', 0))
             ->when($filter === 'unread', fn($q) => $q
                 ->where('is_archived', false)
-                ->where('staff_unread_count', '>', 0));
-
-        // Поиск. По ID — без special-case (раньше обходил фильтр по participants,
-        // теперь фильтра нет — special-case тоже не нужен).
-        // По имени — через participants.user (support-чат имеет 1 participant = юзер).
-        if ($search !== '') {
-            $query->where(function ($sub) use ($search, $searchOperator, $isId) {
-                if ($isId) {
-                    $sub->where('id', (int) $search);
-                } else {
-                    $sub->whereHas('participants.user', fn($uq) => $uq
-                        ->withTrashed()->where('name', $searchOperator, "%{$search}%"));
-                }
-            });
-        }
-
-        // При поиске по ID — нужный чат первым
-        $query->when($isId, fn($q) => $q
-            ->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]));
-
-        // Сортировка: чаты без last_message_at в конце, потом по свежести.
-        $query->orderByRaw('last_message_at IS NULL, last_message_at DESC')
-            ->orderBy('id', 'desc');
-
-        $chats = $query
+                ->where('staff_unread_count', '>', 0))
+            // Поиск. По ID — без special-case (раньше обходил фильтр по participants,
+            // теперь фильтра нет — special-case тоже не нужен).
+            // По имени — через participants.user (support-чат имеет 1 participant = юзер).
+            ->when($search !== '', function ($q) use ($search, $searchOperator, $isId) {
+                $q->where(function ($sub) use ($search, $searchOperator, $isId) {
+                    if ($isId) {
+                        $sub->where('id', (int) $search);
+                    } else {
+                        $sub->whereHas('participants.user', fn($uq) => $uq
+                            ->withTrashed()
+                            ->where('name', $searchOperator, "%{$search}%"));
+                    }
+                });
+            })
+            // При поиске по ID — нужный чат первым
+            ->when($isId, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
+            // Сортировка: чаты без last_message_at в конце, потом по свежести.
+            ->orderByRaw('last_message_at IS NULL, last_message_at DESC')
+            ->orderBy('id', 'desc')
             ->with([
-                'participants.user' => fn($q) => $q->withTrashed()->with(['photos' => $avatarQuery]),
-                'latestMessage' => fn($q) => $q->select([
-                    'messages.id',
-                    'messages.chat_id',
-                    'messages.type',
-                    'messages.body',
-                    'messages.created_at',
+                'participants.user' => fn($q) => $q->withTrashed()->withAvatar(),
+                'latestMessage'     => fn($q) => $q->select([
+                    'messages.id', 'messages.chat_id', 'messages.type',
+                    'messages.body', 'messages.created_at',
                 ]),
                 // Кто последний раз прочитал — для UI «Прочитал {name} 5 мин назад».
                 // withTrashed — если админа удалили, имя всё равно подгрузится
@@ -119,66 +113,35 @@ class SupportChatController extends AdminController
             ])
             ->paginate($perPage, ['*'], 'page', $page);
 
-        return response()->json([
-            'data'  => $chats->map(fn(Chat $c) => $this->formatChatListItem($c)),
-            'meta'  => [
-                'current_page' => $chats->currentPage(),
-                'last_page'    => $chats->lastPage(),
-                'per_page'     => $chats->perPage(),
-                'total'        => $chats->total(),
-                'from'         => $chats->firstItem(),
-                'to'           => $chats->lastItem(),
-            ],
-            // Глобальные счётчики — ОДИНАКОВЫЕ для всех staff.
-            'counts'  => $this->getStats(),
-            'filter'  => $filter,
+        return $this->paginated($chats, SupportChatResource::class, [
+            'counts' => $this->getStats(),
+            'filter' => $filter,
         ]);
     }
 
     /**
-     * Детали чата: участники + пагинация сообщений по курсору.
+     * GET /api/admin/support-chats/{chatId} — детали тикета + сообщения.
      *
      * БЕЗ проверки участия — любой staff может читать любой support-чат.
      *
      * Параметр ?before={messageId} (опционально):
-     *  - НЕ передан (первая загрузка) — последние 50 сообщений.
+     *  - НЕ передан — последние 50 сообщений.
      *  - Передан — 50 сообщений с id < before (более старые).
      */
     public function show(Request $request, int $chatId): JsonResponse
     {
-        $avatarQuery = fn($q) => $q->select([
-            'id',
-            'user_id',
-            'is_primary',
-            'status',
-            'path_thumb',
-            'path_medium',
-            'path_large',
-            'path_original',
-        ])->orderByDesc('is_primary')->limit(1);
-
-        $chat = Chat::with([
-            'participants.user' => fn($q) => $q->withTrashed()->with(['photos' => $avatarQuery]),
-            'lastReadBy' => fn($q) => $q->withTrashed()->select(['id', 'name']),
-        ])->find($chatId);
-
-        if (!$chat || $chat->type !== Chat::TYPE_SUPPORT) {
-            return response()->json(['message' => 'Чат не найден'], 404);
+        $chat = $this->findSupportChat($chatId);
+        if (! $chat) {
+            return $this->notFound('Чат');
         }
-
-        // В support-чате partner = НЕ-staff participant (т.е. юзер).
-        // В старых чатах (до рефактора на «одно лицо») в participants могло
-        // быть [admin, user] — first() мог вернуть admin и в шапке показывалась
-        // аватарка текущего админа вместо юзера. Фильтруем по !isStaff() —
-        // берём именно юзера, независимо от порядка insertion.
-        $partner = $chat->participants->first(fn($p) => $p->user && !$p->user->isStaff())?->user;
 
         // === Пагинация сообщений по курсору ===
         $beforeId = $request->integer('before');
         $perPage  = 50;
 
+        // +1 чтобы узнать has_more без отдельного COUNT(*)
         $messages = Message::where('chat_id', $chatId)
-            ->with(['sender' => fn($q) => $q->withTrashed()->with(['photos' => $avatarQuery])])
+            ->with(['sender' => fn($q) => $q->withTrashed()->withAvatar()])
             ->when($beforeId > 0, fn($q) => $q->where('id', '<', $beforeId))
             ->orderByDesc('id')
             ->limit($perPage + 1)
@@ -188,64 +151,49 @@ class SupportChatController extends AdminController
         if ($hasMore) {
             $messages = $messages->take($perPage);
         }
-
         $messages = $messages->sortBy('created_at')->values();
         $oldestId = $messages->isNotEmpty() ? $messages->first()->id : null;
 
+        // SupportChatResource через whenLoaded('latestMessage') — в show() мы её
+        // НЕ грузим, поэтому last_message в ответе будет отсутствовать (что и нужно).
         return response()->json([
-            'data' => [
-                'id'                => $chat->id,
-                'is_locked'         => (bool) $chat->is_locked,
-                'is_archived'       => (bool) $chat->is_archived,
-                'last_message_at'   => $chat->last_message_at?->toIso8601String(),
-                'partner'           => AdminUserBadgeResource::nullable($partner, withIsStaff: true),
-                // Глобальное staff-state:
-                'staff_unread_count'    => (int) $chat->staff_unread_count,
-                'staff_last_read_at'    => $chat->staff_last_read_at?->toIso8601String(),
-                'staff_last_read_by'    => $chat->lastReadBy ? [
-                    'id'   => $chat->lastReadBy->id,
-                    'name' => $chat->lastReadBy->name,
-                ] : null,
-                'messages' => $messages->map(fn($m) => [
-                    'id'         => $m->id,
-                    'type'       => $m->type,
-                    'body'       => $m->body,
-                    'status'     => $m->status,
-                    'created_at' => $m->created_at?->toIso8601String(),
-                    'sender'     => $m->sender ? AdminUserBadgeResource::nullable($m->sender, withIsStaff: true) : null,
-                ])->toArray(),
-                'messages_meta' => [
-                    'has_more'  => $hasMore,
-                    'oldest_id' => $oldestId,
+            'data' => array_merge(
+                (new SupportChatResource($chat))->resolve($request),
+                [
+                    'messages'      => ChatMessageResource::collection($messages)->resolve($request),
+                    'messages_meta' => [
+                        'has_more'  => $hasMore,
+                        'oldest_id' => $oldestId,
+                    ],
                 ],
-            ],
+            ),
         ]);
     }
 
     /**
-     * Отметить чат как прочитанный — ГЛОБАЛЬНО для всех staff.
+     * POST /api/admin/support-chats/{chatId}/mark-as-read
      *
-     * Сбрасывает staff_unread_count в 0, обновляет staff_last_read_at/by_id.
-     * Broadcast SupportChatRead на admin.support — другие staff увидят
-     * «прочитано» в realtime в своих списках.
+     * ГЛОБАЛЬНО для всех staff: сбрасывает staff_unread_count, обновляет
+     * staff_last_read_at/by_id. Broadcast SupportChatRead на admin.support —
+     * другие staff видят «прочитано» в realtime.
      */
     public function markAsRead(Request $request, int $chatId): JsonResponse
     {
         $admin = $request->user();
-        $chat  = Chat::find($chatId);
-        if (!$chat || $chat->type !== Chat::TYPE_SUPPORT) {
-            return response()->json(['message' => 'Чат не найден'], 404);
+        $chat  = $this->findSupportChat($chatId);
+        if (! $chat) {
+            return $this->notFound('Чат');
         }
 
         // Если уже прочитан этим же админом — нет смысла update + broadcast.
         // Экономим DB write и спам в WebSocket.
         if ((int) $chat->staff_unread_count === 0 && $chat->staff_last_read_by_id === $admin->id) {
-            return response()->json(['message' => 'Уже прочитано.']);
+            return $this->message('Уже прочитано.');
         }
 
         $before = [
-            'staff_unread_count'  => (int) $chat->staff_unread_count,
-            'staff_last_read_at'  => $chat->staff_last_read_at?->toIso8601String(),
+            'staff_unread_count'    => (int) $chat->staff_unread_count,
+            'staff_last_read_at'    => $chat->staff_last_read_at?->toIso8601String(),
             'staff_last_read_by_id' => $chat->staff_last_read_by_id,
         ];
 
@@ -255,7 +203,6 @@ class SupportChatController extends AdminController
             'staff_last_read_by_id' => $admin->id,
         ]);
 
-        // Аудит — кто и когда прочитал тикет.
         AdminLog::record(
             action: 'support.mark_as_read',
             model: $chat,
@@ -273,7 +220,6 @@ class SupportChatController extends AdminController
         );
 
         // Realtime: другие staff видят «прочитано» сразу.
-        // ShouldBroadcastNow + afterCommit — срабатывает сразу после коммита.
         broadcast(new SupportChatRead(
             chatId: $chat->id,
             readById: $admin->id,
@@ -281,41 +227,33 @@ class SupportChatController extends AdminController
             readAt: now()->toIso8601String(),
         ))->toOthers();
 
-        Cache::forget('admin_support_stats');
-        Cache::forget('admin_sidebar_stats');
+        $this->invalidateStatsCache();
 
-        return response()->json(['message' => 'Тикет отмечен как прочитанный.']);
+        return $this->message('Тикет отмечен как прочитанный.');
     }
 
     /**
+     * POST /api/admin/support-chats/{chatId}/archive
      * Заархивировать тикет — ГЛОБАЛЬНО для всех staff.
      */
     public function archive(Request $request, int $chatId): JsonResponse
     {
         $admin = $request->user();
-        $chat  = Chat::find($chatId);
-        if (!$chat || $chat->type !== Chat::TYPE_SUPPORT) {
-            return response()->json(['message' => 'Чат не найден'], 404);
+        $chat  = $this->findSupportChat($chatId);
+        if (! $chat) {
+            return $this->notFound('Чат');
         }
-
         if ($chat->is_archived) {
-            return response()->json(['message' => 'Тикет уже в архиве.']);
+            return $this->message('Тикет уже в архиве.');
         }
 
-        // Кто юзер (для аудита). Берём НЕ-staff participant — в старых чатах
-        // могло быть [admin, user], без фильтра получили бы admin.
-        $userId = $chat->participants()
-            ->whereHas('user', fn($q) => $q->whereNotIn('role', ['admin', 'moderator', 'support']))
-            ->value('user_id');
-
-        $before = ['is_archived' => false];
-        $chat->update(['is_archived' => true]);
+        $userId = $this->getTicketUserId($chat);
 
         AdminLog::record(
             action: 'support.archive',
             model: $chat,
             admin: $admin,
-            before: $before,
+            before: ['is_archived' => false],
             after: [
                 'is_archived' => true,
                 'context' => [
@@ -327,6 +265,8 @@ class SupportChatController extends AdminController
             participants: array_filter([$admin->id, $userId]),
         );
 
+        $chat->update(['is_archived' => true]);
+
         broadcast(new SupportChatArchived(
             chatId: $chat->id,
             archivedById: $admin->id,
@@ -334,41 +274,33 @@ class SupportChatController extends AdminController
             archivedAt: now()->toIso8601String(),
         ))->toOthers();
 
-        Cache::forget('admin_support_stats');
-        Cache::forget('admin_sidebar_stats');
+        $this->invalidateStatsCache();
 
-        return response()->json(['message' => 'Тикет архивирован.']);
+        return $this->message('Тикет архивирован.');
     }
 
     /**
+     * POST /api/admin/support-chats/{chatId}/unarchive
      * Вернуть тикет из архива — ГЛОБАЛЬНО для всех staff.
      */
     public function unarchive(Request $request, int $chatId): JsonResponse
     {
         $admin = $request->user();
-        $chat  = Chat::find($chatId);
-        if (!$chat || $chat->type !== Chat::TYPE_SUPPORT) {
-            return response()->json(['message' => 'Чат не найден'], 404);
+        $chat  = $this->findSupportChat($chatId);
+        if (! $chat) {
+            return $this->notFound('Чат');
+        }
+        if (! $chat->is_archived) {
+            return $this->message('Тикет не в архиве.');
         }
 
-        if (!$chat->is_archived) {
-            return response()->json(['message' => 'Тикет не в архиве.']);
-        }
-
-        // Кто юзер (для аудита). Берём НЕ-staff participant — в старых чатах
-        // могло быть [admin, user], без фильтра получили бы admin.
-        $userId = $chat->participants()
-            ->whereHas('user', fn($q) => $q->whereNotIn('role', ['admin', 'moderator', 'support']))
-            ->value('user_id');
-
-        $before = ['is_archived' => true];
-        $chat->update(['is_archived' => false]);
+        $userId = $this->getTicketUserId($chat);
 
         AdminLog::record(
             action: 'support.unarchive',
             model: $chat,
             admin: $admin,
-            before: $before,
+            before: ['is_archived' => true],
             after: [
                 'is_archived' => false,
                 'context' => [
@@ -380,6 +312,8 @@ class SupportChatController extends AdminController
             participants: array_filter([$admin->id, $userId]),
         );
 
+        $chat->update(['is_archived' => false]);
+
         broadcast(new SupportChatUnarchived(
             chatId: $chat->id,
             unarchivedById: $admin->id,
@@ -387,81 +321,73 @@ class SupportChatController extends AdminController
             unarchivedAt: now()->toIso8601String(),
         ))->toOthers();
 
-        Cache::forget('admin_support_stats');
-        Cache::forget('admin_sidebar_stats');
+        $this->invalidateStatsCache();
 
-        return response()->json(['message' => 'Тикет возвращен из архива.']);
+        return $this->message('Тикет возвращен из архива.');
     }
 
     /**
-     * Отправить сообщение от лица админа в чат поддержки.
+     * POST /api/admin/support-chats/{chatId}/send
      *
-     * БЕЗ проверки участия — любой staff может написать в любой support-чат.
+     * Отправить сообщение от лица админа. БЕЗ проверки участия — любой staff
+     * может написать в любой support-чат.
      *
      * Если чат был в архиве — AUTO-UNARCHIVE (reopen тикета).
      * Это стандартное поведение support systems (Freshdesk, Zendesk):
      * юзер ответил в архивный тикет → тикет переоткрывается.
-     *
-     * После отправки:
-     *   - chats.last_message_at = now() (для сортировки списка)
-     *   - chats.staff_unread_count = 0, staff_last_read_* обновляются
-     *     (админ сам прочитал своё сообщение)
-     *   - юзеру chat_participants.unread_count++ (для notification юзеру)
      *
      * B5: проверка is_locked — нельзя писать в заблокированный чат.
      */
     public function sendMessage(SendSupportChatMessageRequest $request, int $chatId, SendSupportChatMessageAction $action): JsonResponse
     {
         $admin = $request->user();
-        $chat  = Chat::find($chatId);
-        if (!$chat || $chat->type !== Chat::TYPE_SUPPORT) {
-            return response()->json(['message' => 'Чат не найден'], 404);
+        $chat  = $this->findSupportChat($chatId);
+        if (! $chat) {
+            return $this->notFound('Чат');
         }
 
         // B5: проверка is_locked.
         if ($chat->is_locked) {
-            return response()->json(['message' => 'Чат заблокирован. Разблокируйте его, чтобы писать.'], 422);
+            return $this->message('Чат заблокирован. Разблокируйте его, чтобы писать.', 422);
         }
 
-        $data = $request->validated();
-        $body = trim($data['body']);
+        $body = trim($request->validated()['body']);
 
         // Бизнес-логика (транзакция, аудит, broadcast, кэш) — в Action.
         $wasArchived = $action->send($chat, $admin, $body);
 
-        return response()->json([
-            'message' => $wasArchived
+        return $this->message(
+            $wasArchived
                 ? 'Сообщение отправлено. Тикет переоткрыт из архива.'
                 : 'Сообщение отправлено',
-            'auto_unarchived' => $wasArchived,
-        ]);
+            200,
+            ['auto_unarchived' => $wasArchived],
+        );
     }
 
     /**
+     * POST /api/admin/support-chats/start/{userId}
      * Создать support-чат с пользователем (если ещё не существует).
-     *
-     * БЕЗ adminId — чат не привязывается к конкретному админу.
-     * Все staff видят его сразу после создания.
      */
     public function startWithUser(Request $request, int $userId): JsonResponse
     {
         $user = User::withTrashed()->find($userId);
-
-        if (!$user) {
-            return response()->json(['message' => 'Пользователь не найден'], 404);
+        if (! $user) {
+            return $this->notFound('Пользователь');
         }
         if ($user->isStaff()) {
-            return response()->json(['message' => 'Нельзя начать чат с сотрудником'], 422);
+            return $this->message('Нельзя начать чат с сотрудником', 422);
         }
 
         $chat = Chat::getOrCreateSupportChat($user->id);
 
-        return response()->json([
-            'message' => 'Чат готов',
-            'chat_id' => $chat->id,
-        ]);
+        return $this->message('Чат готов', 200, ['chat_id' => $chat->id]);
     }
 
+    /**
+     * GET /api/admin/support-chats/templates
+     * Короткий список активных шаблонов для чата поддержки (без пагинации).
+     */
     public function templates(Request $request): JsonResponse
     {
         $templates = Cache::rememberForever('admin_support_templates', function () {
@@ -470,11 +396,11 @@ class SupportChatController extends AdminController
                 ->orderBy('sort_order')
                 ->orderBy('title')
                 ->get()
-                ->map(fn($t) => [
-                    'id'        => $t->id,
-                    'title'     => $t->title,
-                    'body'      => $t->body,
-                    'category'  => $t->category?->name ?? 'Без категории',
+                ->map(fn ($t) => [
+                    'id'       => $t->id,
+                    'title'    => $t->title,
+                    'body'     => $t->body,
+                    'category' => $t->category?->name ?? 'Без категории',
                 ])
                 ->toArray();
         });
@@ -487,13 +413,44 @@ class SupportChatController extends AdminController
     // ============================================
 
     /**
-     * Глобальные счётчики — ОДИНАКОВЫЕ для всех staff.
-     * Cache key БЕЗ admin ID (раньше был per-admin).
+     * Найти support-чат по ID с eager-load связей для show(),
+     * либо вернуть null если чат не существует или не support-тип.
+     *
+     * Заменяет дубликат `if (!$chat || $chat->type !== Chat::TYPE_SUPPORT)`
+     * который копипастился в 6 методах (show, markAsRead, archive, unarchive,
+     * sendMessage, и т.д.).
+     */
+    private function findSupportChat(int $chatId): ?Chat
+    {
+        return Chat::support()
+            ->with([
+                'participants.user' => fn($q) => $q->withTrashed()->withAvatar(),
+                'lastReadBy'        => fn($q) => $q->withTrashed()->select(['id', 'name']),
+            ])
+            ->find($chatId);
+    }
+
+    /**
+     * ID юзера-владельца тикета (для аудита AdminLog).
+     *
+     * Берём НЕ-staff participant — в старых чатах могло быть [admin, user],
+     * без фильтра получили бы admin. В новых чатах participant один = юзер.
+     */
+    private function getTicketUserId(Chat $chat): ?int
+    {
+        return $chat->participants()
+            ->whereHas('user', fn($q) => $q->whereNotIn('role', ['admin', 'moderator', 'support']))
+            ->value('user_id');
+    }
+
+    /**
+     * Глобальные счётчики тикетов — ОДИНАКОВЫЕ для всех staff.
+     * Cache key БЕЗ admin ID (раньше был per-admin — это была бага).
      */
     private function getStats(): array
     {
         return Cache::remember('admin_support_stats', 60, function () {
-            $stats = Chat::where('type', Chat::TYPE_SUPPORT)
+            $stats = Chat::support()
                 ->selectRaw("
                     COUNT(*) as total_count,
                     SUM(CASE WHEN is_archived = false AND staff_unread_count = 0 THEN 1 ELSE 0 END) as active_count,
@@ -510,39 +467,15 @@ class SupportChatController extends AdminController
         });
     }
 
-    private function formatChatListItem(Chat $chat): array
+    /**
+     * Инвалидация кэшей support-секции.
+     *
+     * Заменяет дубликат `Cache::forget('admin_support_stats'); Cache::forget('admin_sidebar_stats');`
+     * который копипастился в markAsRead/archive/unarchive (3 раза).
+     */
+    private function invalidateStatsCache(): void
     {
-        // Partner = НЕ-staff participant (юзер).
-        // Фильтруем по !isStaff() вместо firstWhere('user_id', '!=', $adminId)
-        // потому что:
-        //   - в старых чатах (до рефактора) в participants могло быть [admin, user]
-        //     и first() мог вернуть admin (если он был вставлен первым)
-        //   - в новых чатах participant один = юзер
-        // Фильтр по isStaff() даёт одинаковый правильный результат в обоих случаях.
-        $partner    = $chat->participants->first(fn($p) => $p->user && !$p->user->isStaff())?->user;
-        $lastMsg    = $chat->latestMessage;
-        $lastReadBy = $chat->lastReadBy;
-
-        return [
-            'id'                => $chat->id,
-            'is_locked'         => (bool) $chat->is_locked,
-            'is_archived'       => (bool) $chat->is_archived,
-            'last_message_at'   => $chat->last_message_at?->toIso8601String(),
-            // Глобальное staff-state (раньше было per-admin):
-            'staff_unread_count'    => (int) $chat->staff_unread_count,
-            'staff_last_read_at'    => $chat->staff_last_read_at?->toIso8601String(),
-            'staff_last_read_by'    => $lastReadBy ? [
-                'id'   => $lastReadBy->id,
-                'name' => $lastReadBy->name,
-            ] : null,
-            'partner'         => AdminUserBadgeResource::nullable($partner, withIsStaff: true),
-            'last_message'    => $lastMsg ? [
-                'id'         => $lastMsg->id,
-                'type'       => $lastMsg->type,
-                'body'       => $lastMsg->body,
-                'created_at' => $lastMsg->created_at?->toIso8601String(),
-            ] : null,
-        ];
+        Cache::forget('admin_support_stats');
+        Cache::forget('admin_sidebar_stats');
     }
-
-}
+} 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Admin\System;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\System\StoreBlogCategoryRequest;
 use App\Http\Requests\Api\V1\Admin\System\UpdateBlogCategoryRequest;
+use App\Http\Resources\Api\V1\Admin\System\BlogCategoryResource;
 use App\Models\AdminLog;
 use App\Models\BlogCategory;
 use App\Models\BlogPost;
@@ -12,23 +13,29 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
+/**
+ * CRUD категорий блога.
+ *
+ * Slug генерируется из name через Str::slug. Если пустой (например, name только
+ * из кириллицы) — fallback 'category-{time()}'.
+ *
+ * При удалении категории — её посты получают category_id=null (uncategorized).
+ *
+ * posts_count в index — from withCount. В store()/update() withCount не вызывается
+ * → posts_count будет 0 в ответе (это норм, фронт после создания сразу перечитает список).
+ */
 class BlogCategoryController extends AdminController
 {
     public function index(): JsonResponse
     {
         $categories = BlogCategory::active()
             ->ordered()
-            ->get()
-            ->map(fn(BlogCategory $c) => [
-                'id'         => $c->id,
-                'name'       => $c->name,
-                'slug'       => $c->slug,
-                'is_active'  => $c->is_active,
-                'sort_order' => $c->sort_order,
-                'posts_count' => BlogPost::where('category_id', $c->id)->count(),
-            ]);
+            ->withCount('posts')
+            ->get();
 
-        return response()->json(['data' => $categories]);
+        return response()->json([
+            'data' => BlogCategoryResource::collection($categories)->resolve(request()),
+        ]);
     }
 
     public function store(StoreBlogCategoryRequest $request): JsonResponse
@@ -55,14 +62,9 @@ class BlogCategoryController extends AdminController
             ],
         ]);
 
-        return response()->json([
-            'message' => 'Рубрика создана',
-            'data' => [
-                'id'   => $category->id,
-                'name' => $category->name,
-                'slug' => $category->slug,
-            ],
-        ], 201);
+        return $this->message('Рубрика создана', 201, [
+            'data' => new BlogCategoryResource($category),
+        ]);
     }
 
     public function update(UpdateBlogCategoryRequest $request, BlogCategory $category): JsonResponse
@@ -71,6 +73,7 @@ class BlogCategoryController extends AdminController
 
         $before = $category->only(['name', 'is_active', 'sort_order']);
 
+        // Если меняется name — пересчитываем slug.
         if (isset($validated['name']) && $validated['name'] !== $category->name) {
             $slug = Str::slug($validated['name']);
             if (empty($slug)) {
@@ -83,15 +86,8 @@ class BlogCategoryController extends AdminController
 
         AdminLog::record('blog_category.update', $category, $request->user(), $before, $category->only(['name', 'is_active', 'sort_order']));
 
-        return response()->json([
-            'message' => 'Рубрика обновлена',
-            'data' => [
-                'id'         => $category->id,
-                'name'       => $category->name,
-                'slug'       => $category->slug,
-                'is_active'  => $category->is_active,
-                'sort_order' => $category->sort_order,
-            ],
+        return $this->message('Рубрика обновлена', 200, [
+            'data' => new BlogCategoryResource($category),
         ]);
     }
 
@@ -100,6 +96,7 @@ class BlogCategoryController extends AdminController
         $categoryId = $category->id;
         $categoryName = $category->name;
 
+        // Перенос постов в uncategorized (category_id=null) перед удалением категории.
         BlogPost::where('category_id', $categoryId)->update(['category_id' => null]);
 
         AdminLog::record('blog_category.delete', $category, $request->user(), null, [
@@ -113,6 +110,6 @@ class BlogCategoryController extends AdminController
 
         $category->delete();
 
-        return response()->json(['message' => 'Рубрика удалена']);
+        return $this->message('Рубрика удалена');
     }
-}
+} 

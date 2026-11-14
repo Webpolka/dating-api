@@ -12,7 +12,8 @@ use App\Http\Requests\Api\V1\Admin\Moderation\StoreDiaryRubricRequest;
 use App\Http\Requests\Api\V1\Admin\Moderation\UnpublishDiaryRequest;
 use App\Http\Requests\Api\V1\Admin\Moderation\UpdateDiaryRubricRequest;
 use App\Http\Requests\Api\V1\Admin\Moderation\UpdateDiarySettingsRequest;
-use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\Moderation\DiaryResource;
+use App\Http\Resources\Api\V1\Admin\Moderation\DiaryRubricResource;
 use App\Models\Diary;
 use App\Models\DiaryRubric;
 use Illuminate\Http\JsonResponse;
@@ -23,14 +24,15 @@ use Illuminate\Support\Facades\DB;
 /**
  * Модерация записей дневников + CRUD системных рубрик.
  *
- * Read-side (index/counts/show/checkRubricName, фильтры, счётчики,
- * форматирование) живёт здесь. Вся write-логика (транзакции, AdminLog,
- * уведомления DiaryModerated, инвалидация кэша) — в ModerateDiaryAction
- * (посты) и ManageDiaryRubricAction (рубрики) — thin-controller pattern,
- * аналогично PhotoController → ModeratePhotoAction.
+ * Read-side здесь. Write-логика — в ModerateDiaryAction (посты) и
+ * ManageDiaryRubricAction (рубрики).
  *
- * Контракт ModerateDiaryAction: каждый метод возвращает дескриптор
- * ['status' => int, 'body' => array] — контроллер строит из него JsonResponse.
+ * Контракт ModerateDiaryAction: каждый метод возвращает
+ * ['status' => int, 'body' => array] — контроллер строит JsonResponse.
+ *
+ * Два таба в index():
+ *  - diaries (default): список постов с фильтрами
+ *  - rubrics: список системных рубрик (user_id=null)
  */
 class DiaryController extends AdminController
 {
@@ -41,10 +43,9 @@ class DiaryController extends AdminController
     public function index(Request $request): JsonResponse
     {
         $activeTab = $request->string('tab', 'diaries')->toString();
-        if ($activeTab === 'rubrics') {
-            return $this->getRubrics($request);
-        }
-        return $this->getDiaries($request);
+        return $activeTab === 'rubrics'
+            ? $this->getRubrics($request)
+            : $this->getDiaries($request);
     }
 
     private function getDiaries(Request $request): JsonResponse
@@ -68,14 +69,15 @@ class DiaryController extends AdminController
         $isSearching = !empty(trim($search));
         $isIdSearch = $isSearching && ctype_digit($search);
 
-        $avatarQuery = fn($q) => $q->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium'])
-            ->orderByDesc('is_primary')
-            ->limit(1);
-
-        $query = Diary::query()->with([
-            'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'last_seen', 'deleted_at'])->with(['photos' => $avatarQuery]),
-            'diaryRubric',
-        ])
+        // В list-режиме НЕ селектим body (тяжёлый текст) — DiaryResource вернёт body=null.
+        // views_count/comments_count/likes_count — это колонки БД (не связи),
+        // доступны без withCount.
+        $query = Diary::query()
+            ->select(['id', 'user_id', 'title', 'status', 'reject_reason', 'moderated_by', 'moderated_at', 'published_at', 'created_at', 'updated_at', 'deleted_at', 'is_comments_enabled', 'diary_rubric_id', 'views_count', 'comments_count', 'likes_count'])
+            ->with([
+                'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'last_seen', 'deleted_at'])->withAvatar(),
+                'diaryRubric',
+            ])
             ->whereHas('user', fn($q) => $q->excludeStaff());
 
         if ($trashedFilter === 'with') $query->withTrashed();
@@ -92,9 +94,7 @@ class DiaryController extends AdminController
             });
         }
 
-        if ($statusFilter !== 'all') {
-            $query->where('status', $statusFilter);
-        }
+        if ($statusFilter !== 'all') $query->where('status', $statusFilter);
 
         if ($rubricFilter !== 'all') {
             if ($rubricFilter === 'none') {
@@ -104,17 +104,15 @@ class DiaryController extends AdminController
             }
         }
 
-        if ($isIdSearch) {
-            $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-        }
-        $query->latest('published_at')->latest('created_at');
+        $query->when($isIdSearch, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
+            ->latest('published_at')->latest('created_at');
 
         $diaries = $query->paginate($perPage, ['*'], 'page', $page);
 
         return response()->json([
-            'tab' => 'diaries',
-            'data' => $diaries->map(fn($d) => $this->formatDiary($d))->values()->all(),
-            'meta' => [
+            'tab'    => 'diaries',
+            'data'   => DiaryResource::collection($diaries->getCollection())->resolve($request),
+            'meta'   => [
                 'current_page' => $diaries->currentPage(),
                 'last_page'    => $diaries->lastPage(),
                 'per_page'     => $diaries->perPage(),
@@ -123,7 +121,7 @@ class DiaryController extends AdminController
                 'to'           => $diaries->lastItem(),
             ],
             'all_rubrics' => $this->getAllRubrics(),
-            'status' => $statusFilter,
+            'status'      => $statusFilter,
         ]);
     }
 
@@ -148,14 +146,12 @@ class DiaryController extends AdminController
             });
         }
 
-        if ($isIdSearch) {
-            $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-        }
+        $query->when($isIdSearch, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]));
         $rubrics = $query->ordered()->paginate($perPage, ['*'], 'page', $page);
 
         return response()->json([
-            'tab' => 'rubrics',
-            'data' => $rubrics->map(fn($r) => $this->formatRubric($r))->values()->all(),
+            'tab'  => 'rubrics',
+            'data' => DiaryRubricResource::collection($rubrics->getCollection())->resolve($request),
             'meta' => [
                 'current_page' => $rubrics->currentPage(),
                 'last_page'    => $rubrics->lastPage(),
@@ -175,17 +171,16 @@ class DiaryController extends AdminController
 
     public function show(Request $request, int $id): JsonResponse
     {
-        $avatarQuery = fn($q) => $q->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium', 'path_large', 'path_original'])->orderByDesc('is_primary')->limit(1);
+        $diary = Diary::withTrashed()
+            ->with([
+                'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'last_seen', 'deleted_at'])->withAvatar(),
+                'diaryRubric',
+            ])          
+            ->find($id);
 
-        $diary = Diary::withTrashed()->with([
-            'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'last_seen', 'deleted_at'])->with(['photos' => $avatarQuery]),
-            'diaryRubric',
-        ])->find($id);
+        if (!$diary) return $this->notFound('Запись');
 
-        if (!$diary) {
-            return response()->json(['message' => 'Запись не найдена'], 404);
-        }
-
+        // Доступные рубрики для этого поста: системные (user_id=null) + личные автора.
         $availableRubrics = DiaryRubric::where(function ($q) use ($diary) {
             $q->whereNull('user_id')->orWhere('user_id', $diary->user_id);
         })
@@ -194,6 +189,7 @@ class DiaryController extends AdminController
             ->get()
             ->keyBy('id');
 
+        // Если текущая рубрика не попала в список (edge case) — добавим.
         if ($diary->diary_rubric_id && !$availableRubrics->has($diary->diary_rubric_id)) {
             $currentRubric = DiaryRubric::find($diary->diary_rubric_id);
             if ($currentRubric) {
@@ -201,16 +197,14 @@ class DiaryController extends AdminController
             }
         }
 
-        $availableRubrics = $availableRubrics->values();
-
         return response()->json([
-            'data' => $this->formatDiary($diary, true),
-            'available_rubrics' => $availableRubrics->map(fn($r) => [
-                'id' => $r->id,
-                'name' => $r->name,
-                'user_id' => $r->user_id,
+            'data'              => (new DiaryResource($diary))->resolve($request),
+            'available_rubrics' => $availableRubrics->values()->map(fn($r) => [
+                'id'          => $r->id,
+                'name'        => $r->name,
+                'user_id'     => $r->user_id,
                 'is_personal' => $r->user_id !== null,
-                'is_active' => (bool) $r->is_active,
+                'is_active'   => (bool) $r->is_active,
             ]),
         ]);
     }
@@ -222,70 +216,63 @@ class DiaryController extends AdminController
     public function approve(ApproveDiaryRequest $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->approve($diary, $request->user(), $request->validated());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function reject(RejectDiaryRequest $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->reject($diary, $request->user(), $request->validated());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function unpublish(UnpublishDiaryRequest $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->unpublish($diary, $request->user(), $request->validated());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function updateSettings(UpdateDiarySettingsRequest $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->updateSettings($diary, $request->user(), $request->validated());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function destroy(Request $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->destroy($diary, $request->user());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function restore(Request $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::withTrashed()->where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->restore($diary, $request->user());
-
         return response()->json($result['body'], $result['status']);
     }
 
     public function forceDelete(Request $request, int $id, ModerateDiaryAction $action): JsonResponse
     {
         $diary = Diary::withTrashed()->where('id', $id)->lockForUpdate()->first();
-        if (!$diary) return response()->json(['message' => 'Запись не найдена'], 404);
+        if (!$diary) return $this->notFound('Запись');
 
         $result = $action->forceDelete($diary, $request->user());
-
         return response()->json($result['body'], $result['status']);
     }
 
@@ -303,7 +290,6 @@ class DiaryController extends AdminController
         }
 
         $operator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
-
         $query = DiaryRubric::whereNull('user_id')->where('name', $operator, $name);
         if ($ignoreId) {
             $query->where('id', '!=', $ignoreId);
@@ -312,8 +298,8 @@ class DiaryController extends AdminController
         $conflict = $query->first();
 
         return response()->json([
-            'available' => !$conflict,
-            'conflict_id' => $conflict?->id,
+            'available'     => !$conflict,
+            'conflict_id'   => $conflict?->id,
             'conflict_name' => $conflict?->name,
         ]);
     }
@@ -321,42 +307,38 @@ class DiaryController extends AdminController
     public function storeRubric(StoreDiaryRubricRequest $request, ManageDiaryRubricAction $action): JsonResponse
     {
         $rubric = $action->storeRubric($request->user(), $request->validated());
-
-        return response()->json(['message' => 'Рубрика создана', 'data' => $this->formatRubric($rubric)]);
+        return $this->message('Рубрика создана', 200, ['data' => new DiaryRubricResource($rubric)]);
     }
 
     public function updateRubric(UpdateDiaryRubricRequest $request, int $id, ManageDiaryRubricAction $action): JsonResponse
     {
         $rubric = DiaryRubric::where('id', $id)->lockForUpdate()->first();
-        if (!$rubric) return response()->json(['message' => 'Рубрика не найдена'], 404);
+        if (!$rubric) return $this->notFound('Рубрика');
 
         $rubric = $action->updateRubric($rubric, $request->user(), $request->validated());
-
-        return response()->json(['message' => 'Рубрика обновлена', 'data' => $this->formatRubric($rubric)]);
+        return $this->message('Рубрика обновлена', 200, ['data' => new DiaryRubricResource($rubric)]);
     }
 
     public function destroyRubric(DestroyDiaryRubricRequest $request, int $id, ManageDiaryRubricAction $action): JsonResponse
     {
         $rubric = DiaryRubric::where('id', $id)->lockForUpdate()->first();
-        if (!$rubric) return response()->json(['message' => 'Рубрика не найдена'], 404);
+        if (!$rubric) return $this->notFound('Рубрика');
 
         $action->destroyRubric($rubric, $request->user(), $request->validated());
-
-        return response()->json(['message' => 'Рубрика удалена. Записи перенесены.']);
+        return $this->message('Рубрика удалена. Записи перенесены.');
     }
 
     public function toggleRubricStatus(Request $request, int $id, ManageDiaryRubricAction $action): JsonResponse
     {
         $rubric = DiaryRubric::where('id', $id)->lockForUpdate()->first();
-        if (!$rubric) return response()->json(['message' => 'Рубрика не найдена'], 404);
+        if (!$rubric) return $this->notFound('Рубрика');
 
         $action->toggleRubricStatus($rubric, $request->user());
-
-        return response()->json(['message' => 'Статус рубрики изменен']);
+        return $this->message('Статус рубрики изменен');
     }
 
     // ============================================
-    // ХЕЛПЕРЫ (read-side: счётчики, списки, форматирование)
+    // ХЕЛПЕРЫ (read-side: счётчики, списки)
     // ============================================
 
     private function getDiaryCounts(): array
@@ -370,19 +352,19 @@ class DiaryController extends AdminController
                 })
                 ->selectRaw(
                     "COUNT(*) AS all_count, " .
-                        "SUM(CASE WHEN diaries.status = 'published' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS published, " .
-                        "SUM(CASE WHEN diaries.status = 'pending' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS pending, " .
-                        "SUM(CASE WHEN diaries.status = 'rejected' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS rejected, " .
-                        "SUM(CASE WHEN diaries.deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS trashed"
+                    "SUM(CASE WHEN diaries.status = 'published' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS published, " .
+                    "SUM(CASE WHEN diaries.status = 'pending' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS pending, " .
+                    "SUM(CASE WHEN diaries.status = 'rejected' AND diaries.deleted_at IS NULL THEN 1 ELSE 0 END) AS rejected, " .
+                    "SUM(CASE WHEN diaries.deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS trashed"
                 )
                 ->first();
 
             return [
-                'all' => (int) ($row->all_count ?? 0),
-                'published' => (int) ($row->published ?? 0),
-                'pending' => (int) ($row->pending ?? 0),
-                'rejected' => (int) ($row->rejected ?? 0),
-                'trashed' => (int) ($row->trashed ?? 0),
+                'all'           => (int) ($row->all_count ?? 0),
+                'published'     => (int) ($row->published ?? 0),
+                'pending'       => (int) ($row->pending ?? 0),
+                'rejected'      => (int) ($row->rejected ?? 0),
+                'trashed'       => (int) ($row->trashed ?? 0),
                 'rubrics_count' => DiaryRubric::whereNull('user_id')->count(),
             ];
         });
@@ -397,54 +379,5 @@ class DiaryController extends AdminController
                 ->map(fn($r) => ['id' => $r->id, 'name' => $r->name, 'is_active' => (bool) $r->is_active])
                 ->all();
         });
-    }
-
-    private function formatDiary(Diary $d, bool $detailed = false): array
-    {
-        $data = [
-            'id' => $d->id,
-            'title' => $d->title,
-            'status' => $d->status,
-            'reject_reason' => $d->reject_reason,
-            'moderated_by' => $d->moderated_by,
-            'moderated_at' => $d->moderated_at?->toIso8601String(),
-            'published_at' => $d->published_at?->toIso8601String(),
-            'created_at' => $d->created_at?->toIso8601String(),
-            'updated_at' => $d->updated_at?->toIso8601String(),
-            'trashed' => $d->trashed(),
-            'is_comments_enabled' => (bool) $d->is_comments_enabled,
-            'views_count' => (int) $d->views_count,
-            'comments_count' => (int) $d->comments_count,
-            'likes_count' => (int) $d->likes_count,
-            'user' => $d->user ? AdminUserBadgeResource::nullable($d->user, withRole: true) : null,
-            'diary_rubric' => $d->diaryRubric ? [
-                'id' => $d->diaryRubric->id,
-                'name' => $d->diaryRubric->name,
-                'is_active' => (bool) $d->diaryRubric->is_active,
-                'is_personal' => $d->diaryRubric->user_id !== null,
-                'user_id' => $d->diaryRubric->user_id,
-            ] : null,
-        ];
-
-        if ($detailed) {
-            $data['body'] = $d->body;
-        }
-
-        return $data;
-    }
-
-    private function formatRubric(DiaryRubric $r): array
-    {
-        return [
-            'id' => $r->id,
-            'name' => $r->name,
-            'slug' => $r->slug,
-            'description' => $r->description,
-            'is_active' => (bool) $r->is_active,
-            'sort_order' => (int) $r->sort_order,
-            'user_id' => $r->user_id,
-            'diaries_count' => $r->diaries_count ?? 0,
-            'user' => null,
-        ];
     }
 }

@@ -4,15 +4,33 @@ namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 
 use App\Actions\V1\Admin\Moderation\ModerateDatingAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Resources\Api\V1\Admin\Moderation\SwipeResource;
+use App\Http\Resources\Api\V1\Admin\Moderation\UserMatchResource;
 use App\Models\Swipe;
 use App\Models\UserMatch;
-use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
+/**
+ * Модерация свайпов и мэтчей (знакомства).
+ *
+ * Архитектура:
+ *  - Controller: валидация, resolution модели + 404, форматирование через
+ *    SwipeResource / UserMatchResource.
+ *  - ModerateDatingAction: бизнес-логика mutations (удаление свайпа
+ *    разрывает мэтч, разрыв мэтча, восстановление).
+ *
+ * index() — два режима:
+ *  - mode=swipes (default): список свайпов с фильтрами (type, search, dateFrom/dateTo)
+ *  - mode=matches: список мэтчей с фильтрами (search, dateFrom/dateTo)
+ *
+ * Во всех query ИСКЛЮЧАЕМ staff с ОБЕИХ сторон (user/targetUser или user1/user2) —
+ * модерации не интересно видеть свайпы/мэтчи между staff'ом.
+ *
+ * Stats кэшируются на 60 сек (Cache::remember 'dating_admin_stats').
+ */
 class DatingController extends AdminController
 {
     public function index(Request $request): JsonResponse
@@ -31,6 +49,7 @@ class DatingController extends AdminController
         $dateFrom = $request->string('dateFrom', '')->toString();
         $dateTo = $request->string('dateTo', '')->toString();
 
+        // Если dateFrom > dateTo — меняем местами (защита от опечатки юзера).
         if ($dateFrom && $dateTo && Carbon::parse($dateFrom)->gt(Carbon::parse($dateTo))) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
@@ -42,98 +61,71 @@ class DatingController extends AdminController
         $isSearching = !empty(trim($search));
         $isIdSearch = $isSearching && ctype_digit($search);
 
+        // Замыкание eager-load юзера с аватаром — переиспользуем для обеих пар
+        // (user/targetUser или user1/user2).
+        $userWithAvatar = fn($q) => $q->withTrashed()
+            ->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+            ->withAvatar();
+
         if ($viewMode === 'matches') {
-            $query = UserMatch::with([
-                'user1' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-                    ->with(['photos' => fn($sq) => $sq->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium'])->orderByDesc('is_primary')->limit(1)]),
-                'user2' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-                    ->with(['photos' => fn($sq) => $sq->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium'])->orderByDesc('is_primary')->limit(1)]),
-            ])
+            $items = UserMatch::with(['user1' => $userWithAvatar, 'user2' => $userWithAvatar])
                 ->where(function ($q) {
                     $q->whereNull('user1_id')->orWhereHas('user1', fn($q2) => $q2->withTrashed()->excludeStaff());
                 })
                 ->where(function ($q) {
                     $q->whereNull('user2_id')->orWhereHas('user2', fn($q2) => $q2->withTrashed()->excludeStaff());
-                });
-
-            if ($isSearching) {
-                $query->where(function ($innerQ) use ($search, $searchOperator, $isIdSearch) {
+                })
+                ->when($isSearching, fn($q) => $q->where(function ($innerQ) use ($search, $searchOperator, $isIdSearch) {
                     if ($isIdSearch) {
                         $innerQ->where('id', (int) $search)
                             ->orWhere('user1_id', (int) $search)
                             ->orWhere('user2_id', (int) $search);
                     } else {
                         $innerQ->orWhereHas('user1', fn($q2) => $q2->withTrashed()->where(function ($q3) use ($search, $searchOperator) {
-                            $q3->where('name', $searchOperator, "%{$search}%")
-                                ->orWhere('email', $searchOperator, "%{$search}%");
+                            $q3->where('name', $searchOperator, "%{$search}%")->orWhere('email', $searchOperator, "%{$search}%");
                         }))
                             ->orWhereHas('user2', fn($q2) => $q2->withTrashed()->where(function ($q3) use ($search, $searchOperator) {
-                                $q3->where('name', $searchOperator, "%{$search}%")
-                                    ->orWhere('email', $searchOperator, "%{$search}%");
+                                $q3->where('name', $searchOperator, "%{$search}%")->orWhere('email', $searchOperator, "%{$search}%");
                             }));
                     }
-                });
-            }
+                }))
+                ->when($dateFrom, fn($q, $v) => $q->where('created_at', '>=', Carbon::parse($v)->startOfDay()))
+                ->when($dateTo, fn($q, $v) => $q->where('created_at', '<=', Carbon::parse($v)->endOfDay()))
+                ->when($isIdSearch, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
+                ->latest('created_at')->latest('id')
+                ->paginate($perPage, ['*'], 'page', $page);
 
-            if ($dateFrom) $query->where('created_at', '>=', Carbon::parse($dateFrom)->startOfDay());
-            if ($dateTo) $query->where('created_at', '<=', Carbon::parse($dateTo)->endOfDay());
-
-            // При поиске по ID — искомый мэтч первым.
-            if ($isIdSearch) {
-                $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-            }
-            $query->latest('created_at')->latest('id');
-
-            $items = $query->paginate($perPage, ['*'], 'page', $page);
-            $data = $items->map(fn($m) => $this->formatMatch($m))->values()->all();
+            $data = UserMatchResource::collection($items->getCollection())->resolve($request);
         } else {
-            $query = Swipe::with([
-                'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-                    ->with(['photos' => fn($sq) => $sq->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium'])->orderByDesc('is_primary')->limit(1)]),
-                'targetUser' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-                    ->with(['photos' => fn($sq) => $sq->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium'])->orderByDesc('is_primary')->limit(1)]),
-            ])
+            $items = Swipe::with(['user' => $userWithAvatar, 'targetUser' => $userWithAvatar])
                 ->where(function ($q) {
                     $q->whereNull('user_id')->orWhereHas('user', fn($q2) => $q2->withTrashed()->excludeStaff());
                 })
                 ->where(function ($q) {
                     $q->whereNull('target_user_id')->orWhereHas('targetUser', fn($q2) => $q2->withTrashed()->excludeStaff());
-                });
-
-            if ($typeFilter !== 'all') {
-                $query->where('type', $typeFilter);
-            }
-
-            if ($isSearching) {
-                $query->where(function ($innerQ) use ($search, $searchOperator, $isIdSearch) {
+                })
+                ->when($typeFilter !== 'all', fn($q) => $q->where('type', $typeFilter))
+                ->when($isSearching, fn($q) => $q->where(function ($innerQ) use ($search, $searchOperator, $isIdSearch) {
                     if ($isIdSearch) {
                         $innerQ->where('id', (int) $search)
                             ->orWhere('user_id', (int) $search)
                             ->orWhere('target_user_id', (int) $search);
                     } else {
                         $innerQ->orWhereHas('user', fn($q2) => $q2->withTrashed()->where(function ($q3) use ($search, $searchOperator) {
-                            $q3->where('name', $searchOperator, "%{$search}%")
-                                ->orWhere('email', $searchOperator, "%{$search}%");
+                            $q3->where('name', $searchOperator, "%{$search}%")->orWhere('email', $searchOperator, "%{$search}%");
                         }))
                             ->orWhereHas('targetUser', fn($q2) => $q2->withTrashed()->where(function ($q3) use ($search, $searchOperator) {
-                                $q3->where('name', $searchOperator, "%{$search}%")
-                                    ->orWhere('email', $searchOperator, "%{$search}%");
+                                $q3->where('name', $searchOperator, "%{$search}%")->orWhere('email', $searchOperator, "%{$search}%");
                             }));
                     }
-                });
-            }
+                }))
+                ->when($dateFrom, fn($q, $v) => $q->where('created_at', '>=', Carbon::parse($v)->startOfDay()))
+                ->when($dateTo, fn($q, $v) => $q->where('created_at', '<=', Carbon::parse($v)->endOfDay()))
+                ->when($isIdSearch, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
+                ->latest('created_at')->latest('id')
+                ->paginate($perPage, ['*'], 'page', $page);
 
-            if ($dateFrom) $query->where('created_at', '>=', Carbon::parse($dateFrom)->startOfDay());
-            if ($dateTo) $query->where('created_at', '<=', Carbon::parse($dateTo)->endOfDay());
-
-            // При поиске по ID — искомый свайп первым.
-            if ($isIdSearch) {
-                $query->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-            }
-            $query->latest('created_at')->latest('id');
-
-            $items = $query->paginate($perPage, ['*'], 'page', $page);
-            $data = $items->map(fn($s) => $this->formatSwipe($s))->values()->all();
+            $data = SwipeResource::collection($items->getCollection())->resolve($request);
         }
 
         return response()->json([
@@ -148,68 +140,62 @@ class DatingController extends AdminController
                 'to'           => $items->lastItem(),
             ],
             'filters' => [
-                'type' => $typeFilter,
-                'q' => $search,
+                'type'     => $typeFilter,
+                'q'        => $search,
                 'dateFrom' => $dateFrom,
-                'dateTo' => $dateTo,
-            ]
+                'dateTo'   => $dateTo,
+            ],
         ]);
-    }
-
-    public function destroySwipe(Request $request, int $id, ModerateDatingAction $action): JsonResponse
-    {
-        // lockForUpdate — защита от race condition, если два модератора одновременно удаляют один свайп.
-        $swipe = Swipe::lockForUpdate()->find($id);
-        if (!$swipe) {
-            return response()->json(['message' => 'Свайп не найден'], 404);
-        }
-
-        $action->destroySwipe($swipe, $request->user());
-
-        return response()->json(['message' => 'Свайп удален. Если это был лайк, мэтч разорван.']);
-    }
-
-    public function destroyMatch(Request $request, int $id, ModerateDatingAction $action): JsonResponse
-    {
-        // lockForUpdate — защита от двойного разрыва.
-        $match = UserMatch::lockForUpdate()->find($id);
-        if (!$match) {
-            return response()->json(['message' => 'Мэтч не найден'], 404);
-        }
-
-        // Идемпотентность: мэтч уже разорван — ничего не делаем.
-        if ($match->status === UserMatch::STATUS_UNMATCHED) {
-            return response()->json(['message' => 'Мэтч уже разорван']);
-        }
-
-        $action->destroyMatch($match, $request->user());
-
-        return response()->json(['message' => 'Мэтч принудительно разорван.']);
-    }
-
-    public function restoreMatch(Request $request, int $id, ModerateDatingAction $action): JsonResponse
-    {
-        // lockForUpdate — защита от двойного восстановления.
-        $match = UserMatch::lockForUpdate()->find($id);
-        if (!$match) {
-            return response()->json(['message' => 'Мэтч не найден'], 404);
-        }
-
-        // Идемпотентность: мэтч уже активен — ничего не делаем.
-        if ($match->status === UserMatch::STATUS_ACTIVE) {
-            return response()->json(['message' => 'Мэтч уже активен']);
-        }
-
-        $action->restoreMatch($match, $request->user());
-
-        return response()->json(['message' => 'Мэтч восстановлен.']);
     }
 
     public function counts(): JsonResponse
     {
-        return response()->json([
-            'stats' => $this->getStats(),
-        ]);
+        return response()->json(['stats' => $this->getStats()]);
+    }
+
+    // ============================================
+    // ДЕЙСТВИЯ — делегируют ModerateDatingAction
+    // ============================================
+
+    public function destroySwipe(Request $request, int $id, ModerateDatingAction $action): JsonResponse
+    {
+        // lockForUpdate — защита от race condition, если два модератора одновременно.
+        $swipe = Swipe::lockForUpdate()->find($id);
+        if (!$swipe) return $this->notFound('Свайп');
+
+        $action->destroySwipe($swipe, $request->user());
+
+        return $this->message('Свайп удален. Если это был лайк, мэтч разорван.');
+    }
+
+    public function destroyMatch(Request $request, int $id, ModerateDatingAction $action): JsonResponse
+    {
+        $match = UserMatch::lockForUpdate()->find($id);
+        if (!$match) return $this->notFound('Мэтч');
+
+        // Идемпотентность: мэтч уже разорван — ничего не делаем.
+        if ($match->status === UserMatch::STATUS_UNMATCHED) {
+            return $this->message('Мэтч уже разорван');
+        }
+
+        $action->destroyMatch($match, $request->user());
+
+        return $this->message('Мэтч принудительно разорван.');
+    }
+
+    public function restoreMatch(Request $request, int $id, ModerateDatingAction $action): JsonResponse
+    {
+        $match = UserMatch::lockForUpdate()->find($id);
+        if (!$match) return $this->notFound('Мэтч');
+
+        // Идемпотентность: мэтч уже активен — ничего не делаем.
+        if ($match->status === UserMatch::STATUS_ACTIVE) {
+            return $this->message('Мэтч уже активен');
+        }
+
+        $action->restoreMatch($match, $request->user());
+
+        return $this->message('Мэтч восстановлен.');
     }
 
     // ============================================
@@ -219,59 +205,31 @@ class DatingController extends AdminController
     private function getStats(): array
     {
         return Cache::remember('dating_admin_stats', 60, function () {
-            // Симметрично с index(): исключаем staff с ОБЕИХ сторон свайпа/мэтча.
-            $baseSwipeQuery = Swipe::where(function ($q) {
+            // Симметрично с index(): исключаем staff с ОБЕИХ сторон.
+            $swipeStats = Swipe::where(function ($q) {
                 $q->whereNull('user_id')->orWhereHas('user', fn($q2) => $q2->withTrashed()->excludeStaff());
             })->where(function ($q) {
                 $q->whereNull('target_user_id')->orWhereHas('targetUser', fn($q2) => $q2->withTrashed()->excludeStaff());
-            });
-
-            $swipeStats = (clone $baseSwipeQuery)->selectRaw("
+            })->selectRaw("
                 SUM(CASE WHEN type = 'like' THEN 1 ELSE 0 END) as total_likes,
                 SUM(CASE WHEN type = 'dislike' THEN 1 ELSE 0 END) as total_dislikes,
                 SUM(CASE WHEN type = 'superlike' THEN 1 ELSE 0 END) as total_superlikes,
                 COUNT(*) as total_swipes
             ")->first();
 
-            $baseMatchQuery = UserMatch::where(function ($q) {
+            $matchCount = UserMatch::where(function ($q) {
                 $q->whereNull('user1_id')->orWhereHas('user1', fn($q2) => $q2->withTrashed()->excludeStaff());
             })->where(function ($q) {
                 $q->whereNull('user2_id')->orWhereHas('user2', fn($q2) => $q2->withTrashed()->excludeStaff());
-            });
+            })->count();
 
             return [
-                'total_likes'       => (int) ($swipeStats->total_likes ?? 0),
-                'total_dislikes'    => (int) ($swipeStats->total_dislikes ?? 0),
-                'total_superlikes'  => (int) ($swipeStats->total_superlikes ?? 0),
-                'total_swipes'      => (int) ($swipeStats->total_swipes ?? 0),
-                'total_matches'     => $baseMatchQuery->count(),
+                'total_likes'      => (int) ($swipeStats->total_likes ?? 0),
+                'total_dislikes'   => (int) ($swipeStats->total_dislikes ?? 0),
+                'total_superlikes' => (int) ($swipeStats->total_superlikes ?? 0),
+                'total_swipes'     => (int) ($swipeStats->total_swipes ?? 0),
+                'total_matches'    => $matchCount,
             ];
         });
     }
-
-    private function formatSwipe(Swipe $s): array
-    {
-        return [
-            'id'         => $s->id,
-            'type'       => $s->type,
-            'rewinded'   => (bool) $s->rewinded_at,
-            'created_at' => $s->created_at?->toIso8601String(),
-            'user'       => $s->user ? AdminUserBadgeResource::nullable($s->user) : null,
-            'targetUser' => $s->targetUser ? AdminUserBadgeResource::nullable($s->targetUser) : null,
-        ];
-    }
-
-    private function formatMatch(UserMatch $m): array
-    {
-        return [
-            'id'           => $m->id,
-            'status'       => $m->status,
-            'unmatched_by' => $m->unmatched_by,
-            'unmatched_at' => $m->unmatched_at?->toIso8601String(),
-            'created_at'   => $m->created_at?->toIso8601String(),
-            'user1'        => $m->user1 ? AdminUserBadgeResource::nullable($m->user1) : null,
-            'user2'        => $m->user2 ? AdminUserBadgeResource::nullable($m->user2) : null,
-        ];
-    }
-
 }

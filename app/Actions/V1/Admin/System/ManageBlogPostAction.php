@@ -131,7 +131,7 @@ class ManageBlogPostAction
     public function duplicate(BlogPost $post, User $admin): BlogPost
     {
         $new = $post->replicate();
-        $new->slug = $post->slug . '-copy-' . Str::random(6);
+        $new->slug = $post->slug . '-copy-' . Str::lower(Str::random(6));
         $new->title = $post->title . ' (Копия)';
         $new->status = 'draft';
         $new->is_featured = false;

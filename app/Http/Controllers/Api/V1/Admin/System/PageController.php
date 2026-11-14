@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Admin\System;
 
 use App\Http\Controllers\Api\V1\Admin\AdminController;
+use App\Http\Resources\Api\V1\Admin\System\PageResource;
 use App\Models\AdminLog;
 use App\Models\Page;
 use Illuminate\Http\JsonResponse;
@@ -13,21 +14,26 @@ use Illuminate\Support\Facades\Validator;
 /**
  * CMS — статические страницы сайта.
  *
- * body чистится через Purifier (XSS protection).
+ * body чистится через Purifier (XSS protection). После save возвращаем
+ * очищенный body — чтобы фронт обновил редактор реактивно и юзер увидел,
+ * что Purifier вырезал запрещённые теги.
+ *
+ * Cache: admin_pages_counts (60 сек). Инвалидация через clearCountsCache()
+ * после каждого mutation.
  */
 class PageController extends AdminController
 {
     public function index(Request $request): JsonResponse
     {
-        $search = (string) $request->input('search', '');
-        $status = (string) $request->input('status', 'all');
-        $page = max((int) $request->input('page', 1), 1);
+        $search  = (string) $request->input('search', '');
+        $status  = (string) $request->input('status', 'all');
+        $page    = max((int) $request->input('page', 1), 1);
         $perPage = min(max((int) $request->input('per_page', 15), 10), 100);
 
         $searchOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
         $isId = !empty($search) && ctype_digit($search);
 
-        $query = Page::query()
+        $pages = Page::query()
             ->when($search, function ($q) use ($searchOperator, $isId, $search) {
                 $q->where(function ($q2) use ($searchOperator, $isId, $search) {
                     $q2->where('title', $searchOperator, "%{$search}%")
@@ -42,26 +48,17 @@ class PageController extends AdminController
                 }
             })
             ->when($status === 'active', fn($q) => $q->where('is_active', true))
-            ->when($status === 'draft', fn($q) => $q->where('is_active', false))
+            ->when($status === 'draft',  fn($q) => $q->where('is_active', false))
             ->latest('updated_at')
-            ->latest('id');
-
-        $pages = $query->paginate($perPage, ['*'], 'page', $page);
+            ->latest('id')
+            ->paginate($perPage, ['*'], 'page', $page);
 
         return response()->json([
-            'pages' => $pages->map(fn(Page $p) => [
-                'id' => $p->id,
-                'title' => $p->title,
-                'slug' => $p->slug,
-                'meta_description' => $p->meta_description,
-                'is_active' => $p->is_active,
-                'created_at' => $p->created_at?->toIso8601String(),
-                'updated_at' => $p->updated_at?->toIso8601String(),
-            ]),
-            'total' => $pages->total(),
+            'pages'  => PageResource::collection($pages->getCollection())->resolve(request()),
+            'total'  => $pages->total(),
             'current_page' => $pages->currentPage(),
-            'last_page' => $pages->lastPage(),
-            'per_page' => $pages->perPage(),
+            'last_page'    => $pages->lastPage(),
+            'per_page'     => $pages->perPage(),
             'counts' => $this->getCounts(),
         ]);
     }
@@ -70,27 +67,20 @@ class PageController extends AdminController
     {
         $page = Page::findOrFail($id);
         return response()->json([
-            'id' => $page->id,
-            'title' => $page->title,
-            'meta_title' => $page->meta_title,
-            'slug' => $page->slug,
-            'body' => $page->body,
-            'meta_description' => $page->meta_description,
-            'is_active' => $page->is_active,
-            'created_at' => $page->created_at?->toIso8601String(),
-            'updated_at' => $page->updated_at?->toIso8601String(),
+            'data' => (new PageResource($page))->withDetails()->resolve(request()),
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
+        
         $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'meta_title' => 'nullable|string|max:255',
-            'slug' => 'required|regex:/^[a-z0-9-]+$/|unique:pages,slug',
-            'body' => 'nullable|string',
+            'title'            => 'required|string|max:255',
+            'meta_title'       => 'nullable|string|max:255',
+            'slug'             => 'required|regex:/^[a-z0-9-]+$/|unique:pages,slug',
+            'body'             => 'nullable|string',
             'meta_description' => 'nullable|string|max:500',
-            'is_active' => 'boolean',
+            'is_active'        => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -108,23 +98,23 @@ class PageController extends AdminController
         $page = Page::create($data);
 
         AdminLog::record('page.create', $page, $admin, null, [
-            'status' => 'created',
+            'status'  => 'created',
             'context' => [
-                'page_id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'admin_id' => $admin->id
-            ]
+                'page_id'  => $page->id,
+                'title'    => $page->title,
+                'slug'     => $page->slug,
+                'admin_id' => $admin->id,
+            ],
         ]);
 
         $this->clearCountsCache();
 
         return response()->json([
             'message' => 'Страница создана!',
-            'page' => ['id' => $page->id],
+            'page'    => ['id' => $page->id],
             // Возвращаем очищенный body — чтобы фронт обновил редактор
-            // и юзер сразу увидел, что Purifier вырезал запрещённые теги.
-            'body' => $page->body,
+            // и юзер увидел, что Purifier вырезал запрещённые теги.
+            'body'    => $page->body,
         ], 201);
     }
 
@@ -133,12 +123,12 @@ class PageController extends AdminController
         $page = Page::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'meta_title' => 'nullable|string|max:255',
-            'slug' => 'required|regex:/^[a-z0-9-]+$/|unique:pages,slug,' . $id,
-            'body' => 'nullable|string',
+            'title'            => 'required|string|max:255',
+            'meta_title'       => 'nullable|string|max:255',
+            'slug'             => 'required|regex:/^[a-z0-9-]+$/|unique:pages,slug,' . $id,
+            'body'             => 'nullable|string',
             'meta_description' => 'nullable|string|max:500',
-            'is_active' => 'boolean',
+            'is_active'        => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -154,23 +144,23 @@ class PageController extends AdminController
         }
 
         $before = [
-            'title' => $page->getOriginal('title'),
-            'slug' => $page->getOriginal('slug'),
-            'is_active' => $page->getOriginal('is_active')
+            'title'     => $page->getOriginal('title'),
+            'slug'      => $page->getOriginal('slug'),
+            'is_active' => $page->getOriginal('is_active'),
         ];
 
         $page->update($data);
 
         AdminLog::record('page.update', $page, $admin, $before, [
-            'title' => $page->title,
-            'slug' => $page->slug,
+            'title'     => $page->title,
+            'slug'      => $page->slug,
             'is_active' => $page->is_active,
             'context' => [
-                'page_id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'admin_id' => $admin->id
-            ]
+                'page_id'  => $page->id,
+                'title'    => $page->title,
+                'slug'     => $page->slug,
+                'admin_id' => $admin->id,
+            ],
         ]);
 
         $this->clearCountsCache();
@@ -178,7 +168,7 @@ class PageController extends AdminController
         return response()->json([
             'message' => 'Страница обновлена!',
             // Возвращаем очищенный body — фронт обновит редактор реактивно.
-            'body' => $page->body,
+            'body'    => $page->body,
         ]);
     }
 
@@ -190,21 +180,21 @@ class PageController extends AdminController
         $before = ['title' => $page->getOriginal('title'), 'slug' => $page->getOriginal('slug')];
 
         AdminLog::record('page.delete', $page, $admin, $before, [
-            'status' => 'destroyed',
-            'deleted_by' => $admin->id,
+            'status'      => 'destroyed',
+            'deleted_by'  => $admin->id,
             'context' => [
-                'page_id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'admin_id' => $admin->id
-            ]
+                'page_id'  => $page->id,
+                'title'    => $page->title,
+                'slug'     => $page->slug,
+                'admin_id' => $admin->id,
+            ],
         ]);
 
         $page->delete();
 
         $this->clearCountsCache();
 
-        return response()->json(['message' => 'Страница удалена']);
+        return $this->message('Страница удалена');
     }
 
     public function toggleStatus(Request $request, int $id): JsonResponse
@@ -218,22 +208,23 @@ class PageController extends AdminController
         $page->save();
 
         AdminLog::record('page.update', $page, $admin, $before, [
-            'is_active' => $page->is_active,
+            'is_active'  => $page->is_active,
             'toggled_by' => $admin->id,
             'context' => [
-                'page_id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'admin_id' => $admin->id
-            ]
+                'page_id'  => $page->id,
+                'title'    => $page->title,
+                'slug'     => $page->slug,
+                'admin_id' => $admin->id,
+            ],
         ]);
 
         $this->clearCountsCache();
 
-        return response()->json([
-            'message' => $page->is_active ? 'Страница опубликована' : 'Страница снята с публикации',
-            'is_active' => $page->is_active
-        ]);
+        return $this->message(
+            $page->is_active ? 'Страница опубликована' : 'Страница снята с публикации',
+            200,
+            ['is_active' => $page->is_active],
+        );
     }
 
     public function duplicate(Request $request, int $id): JsonResponse
@@ -243,36 +234,36 @@ class PageController extends AdminController
 
         $newSlug = $page->slug . '-copy-' . time();
         $newPage = Page::create([
-            'title' => $page->title . ' (Копия)',
-            'meta_title' => $page->meta_title,
-            'slug' => $newSlug,
-            'body' => $page->body,
+            'title'            => $page->title . ' (Копия)',
+            'meta_title'       => $page->meta_title,
+            'slug'             => $newSlug,
+            'body'             => $page->body,
             'meta_description' => $page->meta_description,
-            'is_active' => false,
+            'is_active'        => false,
         ]);
 
         AdminLog::record('page.create', $newPage, $admin, null, [
-            'status' => 'created',
+            'status'  => 'created',
             'context' => [
                 'source_page_id' => $page->id,
-                'new_page_id' => $newPage->id,
-                'title' => $newPage->title,
-                'slug' => $newPage->slug,
-                'admin_id' => $admin->id
-            ]
+                'new_page_id'    => $newPage->id,
+                'title'          => $newPage->title,
+                'slug'           => $newPage->slug,
+                'admin_id'       => $admin->id,
+            ],
         ]);
 
         $this->clearCountsCache();
 
-        return response()->json(['message' => 'Страница продублирована']);
+        return $this->message('Страница продублирована');
     }
 
     public function bulkAction(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'ids' => 'required|array|max:100',
-            'ids.*' => 'integer|exists:pages,id',
-            'action' => 'required|in:delete,activate,draft',
+            'ids'       => 'required|array|max:100',
+            'ids.*'     => 'integer|exists:pages,id',
+            'action'    => 'required|in:delete,activate,draft',
         ]);
 
         if ($validator->fails()) {
@@ -288,8 +279,8 @@ class PageController extends AdminController
 
             if ($affectedCount > 0) {
                 AdminLog::record('page.bulk_delete', null, $admin, null, [
-                    'count' => $affectedCount,
-                    'sample_ids' => array_slice($ids, 0, 100)
+                    'count'      => $affectedCount,
+                    'sample_ids' => array_slice($ids, 0, 100),
                 ]);
             }
         } else {
@@ -300,9 +291,9 @@ class PageController extends AdminController
 
             if ($affectedCount > 0) {
                 AdminLog::record('page.bulk_update', null, $admin, null, [
-                    'action' => $action,
-                    'count' => $affectedCount,
-                    'sample_ids' => array_slice($ids, 0, 100)
+                    'action'     => $action,
+                    'count'      => $affectedCount,
+                    'sample_ids' => array_slice($ids, 0, 100),
                 ]);
             }
         }
@@ -310,13 +301,17 @@ class PageController extends AdminController
         $this->clearCountsCache();
 
         $messages = [
-            'delete' => "Удалено страниц: {$affectedCount}",
+            'delete'   => "Удалено страниц: {$affectedCount}",
             'activate' => "Опубликовано страниц: {$affectedCount}",
-            'draft' => "Снято с публикации: {$affectedCount}"
+            'draft'    => "Снято с публикации: {$affectedCount}",
         ];
 
-        return response()->json(['message' => $messages[$action] ?? 'Действие выполнено']);
+        return $this->message($messages[$action] ?? 'Действие выполнено');
     }
+
+    // ============================================
+    // ХЕЛПЕРЫ
+    // ============================================
 
     private function getCounts(): array
     {
@@ -330,9 +325,9 @@ class PageController extends AdminController
             $active = (int) ($stats?->active ?? 0);
 
             return [
-                'all' => $total,
+                'all'    => $total,
                 'active' => $active,
-                'draft' => $total - $active,
+                'draft'  => $total - $active,
             ];
         });
     }
@@ -341,4 +336,4 @@ class PageController extends AdminController
     {
         Cache::forget('admin_pages_counts');
     }
-}
+} 

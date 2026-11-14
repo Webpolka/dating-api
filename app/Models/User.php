@@ -272,6 +272,35 @@ class User extends Authenticatable implements MustVerifyEmail
     // СКОПЫ
     // ============================================
 
+    /**
+     * Eager-load аватара юзера для карточек/списков.
+     *
+     * Заменяет дубликат closure $avatarQuery, который копипастился по
+     * контроллерам Communication (Chat, SupportChat), Main (UserController,
+     * UserListingsController), DashboardController — в 6+ местах.
+     *
+     * Селектит только реальные колонки photos (без accessor'а thumb_url,
+     * который падал на PostgreSQL с "column does not exist").
+     *
+     * Использование:
+     *   User::withTrashed()->withAvatar()->find($id);
+     *   User::query()->excludeStaff()->withAvatar()->paginate();
+     *
+     * Примечание: не фильтрует по status/type — это ответственность вызывающего
+     * (для админки нужны и pending, и все типы; для фида — только approved).
+     * Если понадобится вариант с фильтром, добавь scopeWithApprovedAvatar().
+     */
+    public function scopeWithAvatar(Builder $query): Builder
+    {
+        return $query->with([
+            'photos' => fn($sq) => $sq
+                ->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium', 'path_large', 'path_original', 'type'])
+                ->orderByDesc('is_primary')
+                ->limit(1),
+        ]);
+    }
+
+
     public function scopeExcludeStaff(Builder $query): Builder
     {
         return $query->where('role', self::ROLE_USER);

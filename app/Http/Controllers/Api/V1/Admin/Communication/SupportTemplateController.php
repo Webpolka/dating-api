@@ -7,6 +7,8 @@ use App\Http\Requests\Api\V1\Admin\Communication\StoreSupportTemplateCategoryReq
 use App\Http\Requests\Api\V1\Admin\Communication\StoreSupportTemplateRequest;
 use App\Http\Requests\Api\V1\Admin\Communication\UpdateSupportTemplateCategoryRequest;
 use App\Http\Requests\Api\V1\Admin\Communication\UpdateSupportTemplateRequest;
+use App\Http\Resources\Api\V1\Admin\Communication\SupportTemplateCategoryResource;
+use App\Http\Resources\Api\V1\Admin\Communication\SupportTemplateResource;
 use App\Models\AdminLog;
 use App\Models\SupportTemplate;
 use App\Models\SupportTemplateCategory;
@@ -24,7 +26,10 @@ use Illuminate\Support\Str;
  *  - При удалении категории её шаблоны переносятся в "Общие"
  *  - Slug: автогенерация из названия, только латиница/цифры/дефис
  *  - Все действия логируются в AdminLog с объектом
- *  - Кэши: admin_support_template_counts (60сек) + admin_support_templates (forever, для чата поддержки)
+ *  - Кэши:
+ *      admin_support_template_counts (60сек)  — счётчики для списка
+ *      admin_support_templates        (forever) — кэш шаблонов для чата поддержки
+ *    Инвалидация — через clearCache() (один метод, был и раньше).
  */
 class SupportTemplateController extends AdminController
 {
@@ -42,7 +47,7 @@ class SupportTemplateController extends AdminController
         $searchOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
         $isId           = $search !== '' && ctype_digit($search);
 
-        $query = SupportTemplate::query()
+        $templates = SupportTemplate::query()
             ->when($categoryFilter !== 'all', fn($q) => $q->where('category_id', (int) $categoryFilter))
             ->when($search !== '', function ($q) use ($search, $searchOperator, $isId) {
                 if ($isId) {
@@ -56,24 +61,12 @@ class SupportTemplateController extends AdminController
             // Сортировка: при поиске по ID — искомый первым, иначе — по updated_at DESC
             // (свежеотредактированные шаблоны всплывают наверх, как в Notion/Linear).
             // NULL updated_at (если когда-то будет) — в самый низ.
-            ->when($isId, function ($q) use ($search) {
-                $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-            })
+            ->when($isId, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
             ->orderByRaw('updated_at IS NULL, updated_at DESC')
-            ->orderBy('id', 'desc');
+            ->orderBy('id', 'desc')
+            ->paginate($perPage, ['*'], 'page', $page);
 
-        $templates = $query->paginate($perPage, ['*'], 'page', $page);
-
-        return response()->json([
-            'data'  => $templates->map(fn(SupportTemplate $t) => $this->formatTemplate($t)),
-            'meta'  => [
-                'current_page' => $templates->currentPage(),
-                'last_page'    => $templates->lastPage(),
-                'per_page'     => $templates->perPage(),
-                'total'        => $templates->total(),
-                'from'         => $templates->firstItem(),
-                'to'           => $templates->lastItem(),
-            ],
+        return $this->paginated($templates, SupportTemplateResource::class, [
             'counts' => $this->getCounts(),
         ]);
     }
@@ -90,6 +83,7 @@ class SupportTemplateController extends AdminController
             'is_active'   => $data['is_active'] ?? true,
             'sort_order'  => $data['sort_order'] ?? 0,
         ]);
+        $template->load('category');
 
         AdminLog::record('support_template.create', $template, $admin, null, [
             'status'  => 'created',
@@ -102,7 +96,9 @@ class SupportTemplateController extends AdminController
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Шаблон создан!', 'data' => $this->formatTemplate($template)]);
+        return $this->message('Шаблон создан!', 200, [
+            'data' => new SupportTemplateResource($template),
+        ]);
     }
 
     /**
@@ -111,12 +107,12 @@ class SupportTemplateController extends AdminController
     public function show(Request $request, $id): JsonResponse
     {
         $template = SupportTemplate::with('category')->find((int) $id);
-        if (!$template) {
-            return response()->json(['message' => 'Шаблон не найден'], 404);
+        if (! $template) {
+            return $this->notFound('Шаблон');
         }
 
         return response()->json([
-            'data' => $this->formatTemplate($template),
+            'data' => new SupportTemplateResource($template),
         ]);
     }
 
@@ -124,8 +120,8 @@ class SupportTemplateController extends AdminController
     {
         $admin    = $request->user();
         $template = SupportTemplate::find((int) $id);
-        if (!$template) {
-            return response()->json(['message' => 'Шаблон не найден'], 404);
+        if (! $template) {
+            return $this->notFound('Шаблон');
         }
 
         $data = $request->validated();
@@ -145,6 +141,7 @@ class SupportTemplateController extends AdminController
             'is_active'   => $data['is_active'] ?? $template->is_active,
             'sort_order'  => $data['sort_order'] ?? $template->sort_order,
         ]);
+        $template->load('category');
 
         AdminLog::record('support_template.update', $template, $admin, $before, [
             'category_id' => $template->category_id,
@@ -156,15 +153,17 @@ class SupportTemplateController extends AdminController
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Шаблон обновлен!', 'data' => $this->formatTemplate($template)]);
+        return $this->message('Шаблон обновлен!', 200, [
+            'data' => new SupportTemplateResource($template),
+        ]);
     }
 
     public function destroy(Request $request, $id): JsonResponse
     {
         $admin    = $request->user();
         $template = SupportTemplate::find((int) $id);
-        if (!$template) {
-            return response()->json(['message' => 'Шаблон не найден'], 404);
+        if (! $template) {
+            return $this->notFound('Шаблон');
         }
 
         $before = [
@@ -184,7 +183,7 @@ class SupportTemplateController extends AdminController
         $template->delete();
         $this->clearCache();
 
-        return response()->json(['message' => 'Шаблон удален.']);
+        return $this->message('Шаблон удален.');
     }
 
     // ============================================
@@ -201,7 +200,7 @@ class SupportTemplateController extends AdminController
         // Один SQL с withCount — LEFT JOIN считает шаблоны в каждой категории.
         // Раньше было два SQL: один для categories, второй для counts по category_id.
         // withCount добавляет колонку `templates_count` к каждой категории.
-        $query = SupportTemplateCategory::query()
+        $categories = SupportTemplateCategory::query()
             ->withCount('templates')
             ->when($search !== '', function ($q) use ($search, $searchOperator, $isId) {
                 if ($isId) {
@@ -211,18 +210,14 @@ class SupportTemplateController extends AdminController
                         ->orWhere('slug', $searchOperator, "%{$search}%");
                 }
             })
-            ->when($isId, function ($q) use ($search) {
-                $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-            })
+            ->when($isId, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
             ->orderBy('sort_order')
-            ->orderBy('name');
-
-        $categories = $query->get();
+            ->orderBy('name')
+            ->get();
 
         return response()->json([
-            // templates_count берётся из withCount (колонка в response),
-            // не нужен отдельный query по category_id.
-            'data' => $categories->map(fn(SupportTemplateCategory $c) => $this->formatCategory($c, $c->templates_count)),
+            // templates_count берётся из withCount — попадает в Resource через whenCounted.
+            'data'   => SupportTemplateCategoryResource::collection($categories),
             'counts' => $this->getCounts(),
         ]);
     }
@@ -237,19 +232,18 @@ class SupportTemplateController extends AdminController
             $data['slug'] = 'general';
         }
 
-        // Формируем slug
         $finalSlug = !empty($data['slug']) ? Str::slug($data['slug']) : Str::slug($data['name']);
         if (empty($finalSlug)) {
             $finalSlug = 'category-' . time();
         }
 
         // Проверяем уникальность slug ДО создания
-        $existing = SupportTemplateCategory::where('slug', $finalSlug)->exists();
-        if ($existing) {
-            return response()->json([
-                'message' => "Категория с slug «{$finalSlug}» уже существует. Выберите другой slug.",
-                'errors'  => ['slug' => ["Slug «{$finalSlug}» уже занят."]],
-            ], 422);
+        if (SupportTemplateCategory::where('slug', $finalSlug)->exists()) {
+            return $this->message(
+                "Категория с slug «{$finalSlug}» уже существует. Выберите другой slug.",
+                422,
+                ['errors' => ['slug' => ["Slug «{$finalSlug}» уже занят."]]],
+            );
         }
 
         $category = SupportTemplateCategory::create([
@@ -263,29 +257,31 @@ class SupportTemplateController extends AdminController
             'status'  => 'created',
             'context' => [
                 'category_id' => $category->id,
-                'name'         => $category->name,
-                'slug'         => $category->slug,
+                'name'        => $category->name,
+                'slug'        => $category->slug,
             ],
         ]);
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Категория создана!', 'data' => $this->formatCategory($category, 0)]);
+        return $this->message('Категория создана!', 200, [
+            'data' => new SupportTemplateCategoryResource($category),
+        ]);
     }
 
     public function updateCategory(UpdateSupportTemplateCategoryRequest $request, $id): JsonResponse
     {
         $admin    = $request->user();
         $category = SupportTemplateCategory::find((int) $id);
-        if (!$category) {
-            return response()->json(['message' => 'Категория не найдена'], 404);
+        if (! $category) {
+            return $this->notFound('Категория');
         }
 
         $data = $request->validated();
 
         // Защита системной категории: нельзя менять slug
         if (in_array($category->slug, ['general', 'obshhie']) && !empty($data['slug']) && $data['slug'] !== 'general') {
-            return response()->json(['message' => 'Нельзя менять Slug у системной категории!'], 422);
+            return $this->message('Нельзя менять Slug у системной категории!', 422);
         }
 
         // Системная категория "Общие" → slug всегда general
@@ -299,14 +295,12 @@ class SupportTemplateController extends AdminController
         }
 
         // Проверяем уникальность slug среди ДРУГИХ категорий
-        $existing = SupportTemplateCategory::where('slug', $finalSlug)
-            ->where('id', '!=', $category->id)
-            ->exists();
-        if ($existing) {
-            return response()->json([
-                'message' => "Категория с slug «{$finalSlug}» уже существует. Выберите другой slug.",
-                'errors'  => ['slug' => ["Slug «{$finalSlug}» уже занят."]],
-            ], 422);
+        if (SupportTemplateCategory::where('slug', $finalSlug)->where('id', '!=', $category->id)->exists()) {
+            return $this->message(
+                "Категория с slug «{$finalSlug}» уже существует. Выберите другой slug.",
+                422,
+                ['errors' => ['slug' => ["Slug «{$finalSlug}» уже занят."]]],
+            );
         }
 
         $before = [
@@ -332,20 +326,22 @@ class SupportTemplateController extends AdminController
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Категория обновлена!', 'data' => $this->formatCategory($category, 0)]);
+        return $this->message('Категория обновлена!', 200, [
+            'data' => new SupportTemplateCategoryResource($category),
+        ]);
     }
 
     public function destroyCategory(Request $request, $id): JsonResponse
     {
         $admin    = $request->user();
         $category = SupportTemplateCategory::find((int) $id);
-        if (!$category) {
-            return response()->json(['message' => 'Категория не найдена'], 404);
+        if (! $category) {
+            return $this->notFound('Категория');
         }
 
         // Защита системной категории
         if (in_array($category->slug, ['general', 'obshhie'])) {
-            return response()->json(['message' => 'Нельзя удалить системную категорию "Общие"!'], 422);
+            return $this->message('Нельзя удалить системную категорию "Общие"!', 422);
         }
 
         // Перенос шаблонов в "Общие" перед удалением
@@ -371,7 +367,7 @@ class SupportTemplateController extends AdminController
         $category->delete();
         $this->clearCache();
 
-        return response()->json(['message' => "Категория удалена. Шаблоны перемещены в 'Общие'."]);
+        return $this->message("Категория удалена. Шаблоны перемещены в 'Общие'.");
     }
 
     // ============================================
@@ -405,36 +401,4 @@ class SupportTemplateController extends AdminController
         Cache::forget('admin_support_template_counts');
         Cache::forget('admin_support_templates');
     }
-
-    private function formatTemplate(SupportTemplate $t): array
-    {
-        return [
-            'id'          => $t->id,
-            'title'       => $t->title,
-            'body'        => $t->body,
-            'is_active'   => (bool) $t->is_active,
-            'sort_order'  => (int) $t->sort_order,
-            'category_id' => $t->category_id,
-            'category'    => $t->category ? [
-                'id'   => $t->category->id,
-                'name' => $t->category->name,
-                'slug' => $t->category->slug,
-            ] : null,
-            'created_at'  => $t->created_at?->toIso8601String(),
-            'updated_at'  => $t->updated_at?->toIso8601String(),
-        ];
-    }
-
-    private function formatCategory(SupportTemplateCategory $c, int $templatesCount = 0): array
-    {
-        return [
-            'id'              => $c->id,
-            'name'            => $c->name,
-            'slug'            => $c->slug,
-            'is_active'       => (bool) $c->is_active,
-            'sort_order'      => (int) $c->sort_order,
-            'is_system'       => in_array($c->slug, ['general', 'obshhie']),
-            'templates_count' => $templatesCount,
-        ];
-    }
-}
+} 

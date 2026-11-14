@@ -105,6 +105,31 @@ class Chat extends Model
     {
         return $query->where('type', self::TYPE_SUPPORT);
     }
+      /**
+     * Только чаты юзер↔юзер: type=private и НЕТ ни одного staff-участника.
+     *
+     * Заменяет дублирующий whereDoesntHave-блок, который копипастился в:
+     *   - ChatController::index()       (для списка)
+     *   - ChatController::getCounts()   (для счётчиков)
+     *
+     * Использование:
+     *   Chat::onlyUserToUser()->where('is_locked', true)->paginate();
+     *
+     * Логика: whereDoesntHave staff-участника = «все участники — обычные юзеры».
+     * Раньше было whereHas('participants.user', excludeStaff) — это «есть ≥1 юзер»,
+     * что пропускало user↔staff чаты. Сейчас правильно: чат подходит только если
+     * в нём НЕТ ни одного staff.
+     */
+    public function scopeOnlyUserToUser(Builder $query): Builder
+    {
+        return $query
+            ->where('type', self::TYPE_PRIVATE)
+            ->whereDoesntHave('participants', function ($q) {
+                $q->whereHas('user', function ($uq) {
+                    $uq->withTrashed()->where('role', '!=', User::ROLE_USER);
+                });
+            });
+    }
 
     // ============================================
     // ХЕЛПЕРЫ
@@ -117,6 +142,26 @@ class Chat extends Model
 
         return $this->users()->where('user_id', '!=', $userId)->first();
     }
+
+      /**
+     * Является ли чат юзер↔юзер (для проверок в show/toggleLock).
+     *
+     * Используется в:
+     *   - ChatController::show()       — 404 если чат не user↔user
+     *   - ChatController::toggleLock() — 404 если чат не user↔user
+     *
+     * ВАЖНО: toggleLock раньше проверял только type === TYPE_PRIVATE,
+     * но не проверял отсутствие staff. Это БАГА: можно дернуть блокировку
+     * на support-чат (type=support) — но на самом деле на support-чат
+     * проверка type сработает. Однако если в private-чат по какой-то причине
+     * попадёт staff (edge case) — toggleLock отработал бы. Этот метод
+     * закрывает дыру полностью.
+     */
+    public function isUserToUser(): bool
+    {
+        return $this->type === self::TYPE_PRIVATE
+            && ! $this->participants->contains(fn ($p) => $p->user?->isStaff());
+    } 
 
     // ============================================
     // БИЗНЕС-ЛОГИКА (СОЗДАНИЕ ЧАТОВ)

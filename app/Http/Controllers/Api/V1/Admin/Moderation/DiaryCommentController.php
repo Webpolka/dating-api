@@ -5,27 +5,24 @@ namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 use App\Actions\V1\Admin\Moderation\ModerateDiaryCommentAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Moderation\RejectDiaryCommentRequest;
-use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
+use App\Http\Resources\Api\V1\Admin\Moderation\DiaryWithCommentsResource;
 use App\Models\Diary;
 use App\Models\DiaryComment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\DB; 
 
 /**
  * Модерация комментариев к дневникам.
  *
- * Read-side (index/counts, фильтры, счётчики, форматирование) живёт здесь.
- * Вся write-логика (транзакции, каскады, AdminLog, уведомления) —
- * в ModerateDiaryCommentAction (thin-controller pattern, аналогично
- * PhotoController → ModeratePhotoAction).
+ * Read-side здесь. Write-логика — в ModerateDiaryCommentAction.
  *
  * Архитектура (Вариант A — полная аналогия с PhotoCommentController):
  *   - Статусы: pending / approved / rejected. Виртуальный «karantine» = soft-deleted.
- *   - Причины отклонения (только при status=rejected):
- *       пользовательские — profanity / insult / off_topic / spam / other
- *       системная        — parent_rejected (каскад)
- *   - Контекст bulk-операций хранится в admin_logs.action, не в reject_reason.
+ *   - Причины: profanity / insult / off_topic / spam / other / parent_rejected (системная)
+ *
+ * Поддерживает ?diary_id={id} — дерево комментариев конкретного поста
+ * (отключает авто-детект статуса и обычный поиск, показывает все статусы под этим постом).
  */
 class DiaryCommentController extends AdminController
 {
@@ -37,30 +34,31 @@ class DiaryCommentController extends AdminController
     {
         $filters = $this->validateAndExtractFilters($request);
 
-        $avatarQuery = fn($q) => $q->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium', 'path_large', 'path_original'])
-            ->orderByDesc('is_primary')->limit(1);
-        $userSelect = ['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'];
-
         $query = Diary::query()
             ->whereHas('comments', fn($q) => $this->applyCommentFilters($q, $filters))
             ->with([
                 'diaryRubric',
-                'user' => fn($q) => $q->withTrashed()->select($userSelect)->with(['photos' => $avatarQuery]),
-                'comments' => function ($q) use ($avatarQuery, $userSelect, $filters) {
+                'user' => fn($q) => $q->withTrashed()
+                    ->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                    ->withAvatar(),
+                'comments' => function ($q) use ($filters) {
                     $this->applyCommentFilters($q, $filters);
                     $q->with([
-                        'user' => fn($uq) => $uq->withTrashed()->select($userSelect)->with(['photos' => $avatarQuery]),
-                        'allReplies' => function ($q) use ($avatarQuery, $userSelect, $filters) {
+                        'user' => fn($uq) => $uq->withTrashed()
+                            ->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                            ->withAvatar(),
+                        'allReplies' => function ($q) use ($filters) {
                             $q->whereHas('user', fn($u) => $u->excludeStaff());
                             if ($filters['isKarantine']) {
                                 $q->withTrashed();
                             } elseif ($filters['status'] !== 'all') {
                                 $q->where('status', $filters['status']);
                             }
-                            // Грузим parent (с trashed) — нужен фронту для guard'а:
-                            // прятать кнопку restore/approve на ребёнке, если родитель rejected/trashed.
+                            // parent (with trashed) — нужен фронту для guard'а кликабельности.
                             $q->with([
-                                'user' => fn($uq) => $uq->withTrashed()->select($userSelect)->with(['photos' => $avatarQuery]),
+                                'user' => fn($uq) => $uq->withTrashed()
+                                    ->select(['id', 'name', 'email', 'role', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                                    ->withAvatar(),
                                 'parent' => fn($pq) => $pq->withTrashed()->select(['id', 'status', 'deleted_at']),
                             ])->latest();
                         },
@@ -86,15 +84,7 @@ class DiaryCommentController extends AdminController
             });
         }
 
-        // При поиске по ID — искомый комментарий первым.
-        // CASE WHEN id = ? THEN 0 ELSE 1 END — приоритетная сортировка,
-        // потом обычная latest() внутри каждой группы приоритета.
-        // Симметрично с PhotoCommentController и PhotoController.
         // При поиске по ID — пост с искомым КОММЕНТАРИЕМ первым.
-        // Проверяем не только ID поста (diaries.id), но и наличие комментария
-        // с этим ID через подзапрос EXISTS.
-        // Приоритет: 0 = пост содержит комментарий #search, 1 = пост с ID=search,
-        // 2 = остальные (не должны попадать в выдачу, но на всякий случай).
         if ($filters['isIdSearch']) {
             $searchId = (int) $filters['search'];
             $query->orderByRaw(
@@ -111,7 +101,7 @@ class DiaryCommentController extends AdminController
         $diaries = $query->paginate($filters['perPage'], ['*'], 'page', $filters['page']);
 
         return response()->json([
-            'data' => $diaries->map(fn($d) => $this->formatDiaryWithComments($d))->values()->all(),
+            'data' => DiaryWithCommentsResource::collection($diaries->getCollection())->resolve($request),
             'meta' => [
                 'current_page' => $diaries->currentPage(),
                 'last_page'    => $diaries->lastPage(),
@@ -120,7 +110,7 @@ class DiaryCommentController extends AdminController
                 'from'         => $diaries->firstItem(),
                 'to'           => $diaries->lastItem(),
             ],
-            'stats' => $this->getCounts(),
+            'stats'  => $this->getCounts(),
             'status' => $filters['status'],
         ]);
     }
@@ -136,69 +126,54 @@ class DiaryCommentController extends AdminController
 
     public function approve(Request $request, int $id, ModerateDiaryCommentAction $action): JsonResponse
     {
-        // parent загружаем с withTrashed — нужен Action'у для parent guard.
         $comment = DiaryComment::with(['parent' => fn($q) => $q->withTrashed()])->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
         try {
             $message = $action->approve($comment, $request->user());
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            return $this->message($e->getMessage(), 422);
         }
 
-        return response()->json(['message' => $message]);
+        return $this->message($message);
     }
 
     public function reject(RejectDiaryCommentRequest $request, int $id, ModerateDiaryCommentAction $action): JsonResponse
     {
-        // Валидируем: причина должна быть ПОЛЬЗОВАТЕЛЬСКОЙ (не системной).
-        $validated = $request->validated();
-
         $comment = DiaryComment::find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->reject($comment, $request->user(), $validated['reason'])]);
+        return $this->message($action->reject($comment, $request->user(), $request->validated()['reason']));
     }
 
     public function softDelete(Request $request, int $id, ModerateDiaryCommentAction $action): JsonResponse
     {
         $comment = DiaryComment::find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->softDelete($comment, $request->user())]);
+        return $this->message($action->softDelete($comment, $request->user()));
     }
 
     public function restore(Request $request, int $id, ModerateDiaryCommentAction $action): JsonResponse
     {
-        // parent загружаем с withTrashed — нужен Action'у для parent guard.
         $comment = DiaryComment::withTrashed()->with(['parent' => fn($q) => $q->withTrashed()])->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
         try {
             $message = $action->restore($comment, $request->user());
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            return $this->message($e->getMessage(), 422);
         }
 
-        return response()->json(['message' => $message]);
+        return $this->message($message);
     }
 
     public function destroy(Request $request, int $id, ModerateDiaryCommentAction $action): JsonResponse
     {
         $comment = DiaryComment::withTrashed()->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->destroy($comment, $request->user())]);
+        return $this->message($action->destroy($comment, $request->user()));
     }
 
     // ============================================
@@ -215,9 +190,6 @@ class DiaryCommentController extends AdminController
         $search = trim($request->string('q', '')->toString());
         $isIdSearch = $search !== '' && ctype_digit($search);
 
-        // Если передан diary_id — мы смотрим комментарии конкретного поста.
-        // В этом режиме отключаем обычный поиск и авто-детект статуса,
-        // чтобы просто вывести дерево комментариев этого поста.
         $diaryId = $request->integer('diary_id');
 
         if (!$diaryId) {
@@ -233,10 +205,10 @@ class DiaryCommentController extends AdminController
                 }
             }
         } else {
-            // Если ищем по diary_id, обнуляем обычный поиск
+            // Режим дерева комментариев одного поста — отключаем обычный поиск.
             $search = '';
             $isIdSearch = false;
-            $status = 'all'; // Показываем все статусы комментариев под этим постом
+            $status = 'all';
         }
 
         return [
@@ -270,10 +242,6 @@ class DiaryCommentController extends AdminController
         }
     }
 
-    /**
-     * Счётчики для табов.
-     * Один SQL-запрос с условной агрегацией. Фильтруем staff.
-     */
     private function getCounts(): array
     {
         $row = DB::table('diary_comments')
@@ -284,10 +252,10 @@ class DiaryCommentController extends AdminController
             })
             ->selectRaw(
                 "COUNT(*) AS all_count, " .
-                    "COUNT(*) FILTER (WHERE diary_comments.status = 'pending' AND diary_comments.deleted_at IS NULL) AS pending_count, " .
-                    "COUNT(*) FILTER (WHERE diary_comments.status = 'approved' AND diary_comments.deleted_at IS NULL) AS approved_count, " .
-                    "COUNT(*) FILTER (WHERE diary_comments.status = 'rejected' AND diary_comments.deleted_at IS NULL) AS rejected_count, " .
-                    "COUNT(*) FILTER (WHERE diary_comments.deleted_at IS NOT NULL) AS karantine_count"
+                "COUNT(*) FILTER (WHERE diary_comments.status = 'pending' AND diary_comments.deleted_at IS NULL) AS pending_count, " .
+                "COUNT(*) FILTER (WHERE diary_comments.status = 'approved' AND diary_comments.deleted_at IS NULL) AS approved_count, " .
+                "COUNT(*) FILTER (WHERE diary_comments.status = 'rejected' AND diary_comments.deleted_at IS NULL) AS rejected_count, " .
+                "COUNT(*) FILTER (WHERE diary_comments.deleted_at IS NOT NULL) AS karantine_count"
             )
             ->first();
 
@@ -302,62 +270,4 @@ class DiaryCommentController extends AdminController
 
         return $stats;
     }
-
-    // ============================================
-    // ФОРМАТИРОВАНИЕ ДЛЯ API
-    // ============================================
-
-    private function formatDiaryWithComments(Diary $d): array
-    {
-        return [
-            'id'            => $d->id,
-            'title'         => $d->title,
-            'diary_rubric'  => $d->diaryRubric ? [
-                'id'          => $d->diaryRubric->id,
-                'name'        => $d->diaryRubric->name,
-                'is_active'   => (bool) $d->diaryRubric->is_active,
-                'is_personal' => $d->diaryRubric->user_id !== null,
-                'user_id'     => $d->diaryRubric->user_id,
-            ] : null,
-            'user'          => $d->user ? AdminUserBadgeResource::nullable($d->user, withRole: true) : null,
-            'comments'      => $d->comments->map(fn($c) => $this->formatComment($c))->values()->all(),
-        ];
-    }
-
-    private function formatComment(DiaryComment $c): array
-    {
-        // Сводка о родителе — ровно то, что нужно фронту для guard'а кликабельности.
-        $parentSummary = null;
-        if ($c->parent_id && $c->parent) {
-            $parentSummary = [
-                'id'      => $c->parent->id,
-                'status'  => $c->parent->status,
-                'trashed' => $c->parent->trashed(),
-            ];
-        }
-
-        return [
-            'id'            => $c->id,
-            'diary_id'      => $c->diary_id,
-            'user_id'       => $c->user_id,
-            'parent_id'     => $c->parent_id,
-            'content'       => $c->content,
-            'status'        => $c->status,
-            'reject_reason' => $c->reject_reason,
-            'moderated_by'  => $c->moderated_by,
-            'moderated_at'  => $c->moderated_at?->toIso8601String(),
-            'created_at'    => $c->created_at?->toIso8601String(),
-            'updated_at'    => $c->updated_at?->toIso8601String(),
-            'trashed'       => $c->trashed(),
-            'likes_count'   => (int) $c->likes_count,
-            'replies_count' => (int) $c->replies_count,
-            'parent'        => $parentSummary,
-            'user'          => $c->user ? AdminUserBadgeResource::nullable($c->user, withRole: true) : null,
-            'replies'       => ($c->allReplies ?? collect())
-                ->map(fn($r) => $this->formatComment($r))
-                ->values()
-                ->all(),
-        ];
-    }
-
 }

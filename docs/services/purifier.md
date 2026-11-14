@@ -18,6 +18,10 @@ sudo chown -R $USER:$USER .
 
 # (На локалке 777 — это нормально и удобно)
 
+# Создай директорию для кэша Purifier и дай права
+mkdir -p storage/app/purifier
+chmod -R 775 storage/app/purifier
+
 sudo chmod -R 777 storage
 sudo chmod -R 777 bootstrap/cache
 

@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\V1\Admin\Moderation;
 use App\Actions\V1\Admin\Moderation\ModeratePhotoCommentAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Moderation\RejectPhotoCommentRequest;
+use App\Http\Resources\Api\V1\Admin\Moderation\PhotoWithCommentsResource;
 use App\Models\Photo;
 use App\Models\PhotoComment;
-use App\Http\Resources\Api\V1\Admin\AdminUserBadgeResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,18 +15,12 @@ use Illuminate\Support\Facades\DB;
 /**
  * Модерация комментариев к фото.
  *
- * Read-side (index/counts, фильтры, счётчики, форматирование) живёт здесь.
- * Вся write-логика (транзакции, каскады, bulk-операции, AdminLog,
- * уведомления) — в ModeratePhotoCommentAction (thin-controller pattern,
- * аналогично PhotoController → ModeratePhotoAction и
- * DiaryCommentController → ModerateDiaryCommentAction).
+ * Read-side (index/counts, фильтры, счётчики, форматирование через Resource)
+ * живёт здесь. Вся write-логика — в ModeratePhotoCommentAction.
  *
  * Архитектура (Вариант A — Spam как причина, не статус):
  *   - Статусы: pending / approved / rejected. Виртуальный «karantine» = soft-deleted.
- *   - Причины отклонения (только при status=rejected):
- *       пользовательские — profanity / insult / off_topic / spam / other
- *       системная        — parent_rejected (каскад)
- *   - Контекст bulk-операций хранится в admin_logs.action, не в reject_reason.
+ *   - Причины отклонения: profanity / insult / off_topic / spam / other / parent_rejected (системная)
  */
 class PhotoCommentController extends AdminController
 {
@@ -38,28 +32,25 @@ class PhotoCommentController extends AdminController
     {
         $filters = $this->validateAndExtractFilters($request);
 
-        $userAvatarQuery = fn($q) => $q->withTrashed()
-            ->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
-            ->with([
-                'photos' => fn($sq) => $sq->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb', 'path_medium', 'path_large', 'path_original'])
-                    ->where('is_primary', true)->limit(1)
-            ]);
-
         $photos = Photo::withTrashed()
-            ->whereHas('comments', function ($q) use ($userAvatarQuery, $filters) {
+            ->whereHas('comments', function ($q) use ($filters) {
                 $q->whereNull('parent_id');
                 $q->whereHas('user', fn($u) => $u->excludeStaff());
                 $this->applyCommentFilters($q, $filters);
             })
             ->with([
-                'user' => fn($q) => $q->withTrashed()->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at']),
-                'comments' => function ($q) use ($userAvatarQuery, $filters) {
+                'user' => fn($q) => $q->withTrashed()
+                    ->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                    ->withAvatar(),
+                'comments' => function ($q) use ($filters) {
                     $q->whereNull('parent_id');
                     $q->whereHas('user', fn($u) => $u->excludeStaff());
                     $this->applyCommentFilters($q, $filters);
                     $q->with([
-                        'user' => $userAvatarQuery,
-                        'allReplies' => function ($q) use ($userAvatarQuery, $filters) {
+                        'user' => fn($uq) => $uq->withTrashed()
+                            ->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                            ->withAvatar(),
+                        'allReplies' => function ($q) use ($filters) {
                             $q->whereHas('user', fn($u) => $u->excludeStaff());
                             if ($filters['isKarantine']) {
                                 $q->withTrashed();
@@ -67,7 +58,9 @@ class PhotoCommentController extends AdminController
                                 $q->where('status', $filters['status']);
                             }
                             $q->with([
-                                'user' => $userAvatarQuery,
+                                'user' => fn($uq) => $uq->withTrashed()
+                                    ->select(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'is_verified', 'last_seen', 'deleted_at'])
+                                    ->withAvatar(),
                                 'parent' => fn($pq) => $pq->withTrashed()->select(['id', 'status', 'deleted_at']),
                             ]);
                         },
@@ -80,7 +73,7 @@ class PhotoCommentController extends AdminController
 
         return response()->json([
             'mode'   => 'list',
-            'data'   => $photos->getCollection()->map(fn($p) => $this->formatPhotoWithComments($p))->values()->all(),
+            'data'   => PhotoWithCommentsResource::collection($photos->getCollection())->resolve($request),
             'meta'   => [
                 'current_page' => $photos->currentPage(),
                 'last_page'    => $photos->lastPage(),
@@ -105,106 +98,76 @@ class PhotoCommentController extends AdminController
 
     public function approve(Request $request, int $id, ModeratePhotoCommentAction $action): JsonResponse
     {
-        // parent загружаем с withTrashed — нужен Action'у для parent guard.
         $comment = PhotoComment::with(['parent' => fn($q) => $q->withTrashed()])->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
         try {
             $message = $action->approve($comment, $request->user());
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            return $this->message($e->getMessage(), 422);
         }
 
-        return response()->json(['message' => $message]);
+        return $this->message($message);
     }
 
     public function reject(RejectPhotoCommentRequest $request, int $id, ModeratePhotoCommentAction $action): JsonResponse
     {
-        // Валидируем: причина должна быть ПОЛЬЗОВАТЕЛЬСКОЙ (не системной).
-        $validated = $request->validated();
-
         $comment = PhotoComment::find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->reject($comment, $request->user(), $validated['reason'])]);
+        return $this->message($action->reject($comment, $request->user(), $request->validated()['reason']));
     }
 
     public function softDelete(Request $request, int $id, ModeratePhotoCommentAction $action): JsonResponse
     {
         $comment = PhotoComment::find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->softDelete($comment, $request->user())]);
+        return $this->message($action->softDelete($comment, $request->user()));
     }
 
     public function restore(Request $request, int $id, ModeratePhotoCommentAction $action): JsonResponse
     {
-        // parent загружаем с withTrashed — нужен Action'у для parent guard.
         $comment = PhotoComment::withTrashed()->with(['parent' => fn($q) => $q->withTrashed()])->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
         try {
             $message = $action->restore($comment, $request->user());
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            return $this->message($e->getMessage(), 422);
         }
 
-        return response()->json(['message' => $message]);
+        return $this->message($message);
     }
 
     public function destroy(Request $request, int $id, ModeratePhotoCommentAction $action): JsonResponse
     {
         $comment = PhotoComment::withTrashed()->find($id);
-        if (!$comment) {
-            return $this->notFound('Комментарий');
-        }
+        if (!$comment) return $this->notFound('Комментарий');
 
-        return response()->json(['message' => $action->destroy($comment, $request->user())]);
+        return $this->message($action->destroy($comment, $request->user()));
     }
 
     // ============================================
-    // ДЕЙСТВИЯ ПО ФОТО — делегируют ModeratePhotoCommentAction
+    // ДЕЙСТВИЯ ПО ФОТО / ГЛОБАЛЬНЫЕ — делегируют Action
+    // Action возвращает ['count' => int, 'message' => string]
     // ============================================
 
-    /**
-     * Action возвращает ['count' => int, 'message' => string].
-     */
     public function approveRemaining(Request $request, int $photoId, ModeratePhotoCommentAction $action): JsonResponse
     {
         return response()->json($action->approveRemaining($photoId, $request->user()));
     }
 
-    /**
-     * Action возвращает ['count' => int, 'message' => string].
-     */
     public function rejectRemaining(Request $request, int $photoId, ModeratePhotoCommentAction $action): JsonResponse
     {
         return response()->json($action->rejectRemaining($photoId, $request->user()));
     }
 
-    // ============================================
-    // ГЛОБАЛЬНЫЕ ДЕЙСТВИЯ — делегируют ModeratePhotoCommentAction
-    // ============================================
-
-    /**
-     * Action возвращает ['count' => int, 'message' => string].
-     */
     public function approveAllPending(Request $request, ModeratePhotoCommentAction $action): JsonResponse
     {
         return response()->json($action->approveAllPending($request->user()));
     }
 
-    /**
-     * Action возвращает ['count' => int, 'message' => string].
-     */
     public function rejectAllPending(Request $request, ModeratePhotoCommentAction $action): JsonResponse
     {
         return response()->json($action->rejectAllPending($request->user()));
@@ -284,10 +247,6 @@ class PhotoCommentController extends AdminController
         }
     }
 
-    /**
-     * Счётчики для табов.
-     * Один SQL-запрос с условной агрегацией. Фильтруем staff (admin/moderator).
-     */
     private function getCounts(): array
     {
         $row = DB::table('photo_comments')
@@ -298,10 +257,10 @@ class PhotoCommentController extends AdminController
             })
             ->selectRaw(
                 "COUNT(*) AS all_count, " .
-                    "COUNT(*) FILTER (WHERE photo_comments.status = 'pending' AND photo_comments.deleted_at IS NULL) AS pending_count, " .
-                    "COUNT(*) FILTER (WHERE photo_comments.status = 'approved' AND photo_comments.deleted_at IS NULL) AS approved_count, " .
-                    "COUNT(*) FILTER (WHERE photo_comments.status = 'rejected' AND photo_comments.deleted_at IS NULL) AS rejected_count, " .
-                    "COUNT(*) FILTER (WHERE photo_comments.deleted_at IS NOT NULL) AS karantine_count"
+                "COUNT(*) FILTER (WHERE photo_comments.status = 'pending' AND photo_comments.deleted_at IS NULL) AS pending_count, " .
+                "COUNT(*) FILTER (WHERE photo_comments.status = 'approved' AND photo_comments.deleted_at IS NULL) AS approved_count, " .
+                "COUNT(*) FILTER (WHERE photo_comments.status = 'rejected' AND photo_comments.deleted_at IS NULL) AS rejected_count, " .
+                "COUNT(*) FILTER (WHERE photo_comments.deleted_at IS NOT NULL) AS karantine_count"
             )
             ->first();
 
@@ -316,70 +275,4 @@ class PhotoCommentController extends AdminController
 
         return $stats;
     }
-
-    // ============================================
-    // ФОРМАТИРОВАНИЕ ДЛЯ API
-    // ============================================
-
-    private function formatPhotoWithComments(Photo $p): array
-    {
-        $comments = $p->comments ?? collect();
-
-        $pendingCount = $comments->where('status', PhotoComment::STATUS_PENDING)->count()
-            + $comments->flatMap->allReplies->where('status', PhotoComment::STATUS_PENDING)->count();
-
-        return [
-            'id'            => $p->id,
-            'user_id'       => $p->user_id,
-            'is_primary'    => (bool) $p->is_primary,
-            'is_intimate'   => (bool) $p->is_intimate,
-            'status'        => $p->status,
-            'trashed'       => $p->trashed(),
-            'thumb_url'     => $p->thumb_url,
-            'medium_url'    => $p->medium_url,
-            'large_url'     => $p->large_url,
-            'original_url'  => $p->original_url,
-            'album'         => $p->album ? ['id' => $p->album->id, 'name' => $p->album->name] : null,
-            'user'          => $p->user ? AdminUserBadgeResource::nullable($p->user) : null,
-            'pending_count' => $pendingCount,
-            'comments'      => $comments->map(fn($c) => $this->formatComment($c))->values()->all(),
-        ];
-    }
-
-    private function formatComment(PhotoComment $c): array
-    {
-        $parentSummary = null;
-        if ($c->parent_id && $c->parent) {
-            $parentSummary = [
-                'id'      => $c->parent->id,
-                'status'  => $c->parent->status,
-                'trashed' => $c->parent->trashed(),
-            ];
-        }
-
-        return [
-            'id'            => $c->id,
-            'photo_id'      => $c->photo_id,
-            'user_id'       => $c->user_id,
-            'parent_id'     => $c->parent_id,
-            'content'       => $c->content,
-            'status'        => $c->status,
-            'reject_reason' => $c->reject_reason,
-            'moderated_by'  => $c->moderated_by,
-            'moderated_at'  => $c->moderated_at?->toIso8601String(),
-            'created_at'    => $c->created_at?->toIso8601String(),
-            'updated_at'    => $c->updated_at?->toIso8601String(),
-            'trashed'       => $c->trashed(),
-            'is_pinned'     => (bool) $c->is_pinned,
-            'likes_count'   => (int) $c->likes_count,
-            'replies_count' => (int) $c->replies_count,
-            'parent'        => $parentSummary,
-            'user'          => $c->user ? AdminUserBadgeResource::nullable($c->user) : null,
-            'replies'       => ($c->allReplies ?? collect())
-                ->map(fn($r) => $this->formatComment($r))
-                ->values()
-                ->all(),
-        ];
-    }
-
 }

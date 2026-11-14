@@ -6,6 +6,8 @@ use App\Enums\V1\MediaCollection;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\System\BulkDeleteMediaRequest;
 use App\Http\Requests\Api\V1\Admin\System\UploadMediaRequest;
+use App\Http\Resources\Api\V1\Admin\System\MediaDetailResource;
+use App\Http\Resources\Api\V1\Admin\System\MediaListItemResource;
 use App\Jobs\V1\Admin\System\ProcessMediaUploadJob;
 use App\Models\AdminLog;
 use App\Models\Media;
@@ -14,17 +16,28 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
+/**
+ * Медиа-файлы (изображения для CMS, обложек постов, и т.д.).
+ *
+ * Архитектура:
+ *  - Upload: создаёт Media запись + диспатчит ProcessMediaUploadJob
+ *    (генерация вариантов thumb/sm/lg через Intervention Image).
+ *  - Delete: Media::safeDelete() — удаляет файлы с диска + запись из БД.
+ *  - Bulk delete: итеративный safeDelete для каждого файла.
+ *
+ * is_processing — bool: type=image и variants пустой → Job ещё не завершилась.
+ *
+ * Cache: admin_media_counts (60 сек). Инвалидация после upload/destroy/bulkDelete.
+ */
 class MediaController extends AdminController
 {
     public function index(Request $request): JsonResponse
     {
-        // B1: убрал избыточный ->toString()
-        $search = (string) $request->string('search', '');
+        $search     = (string) $request->string('search', '');
         $collection = (string) $request->string('collection', 'all');
-        $perPage = min(max((int) $request->integer('per_page', 24), 1), 100);
-        $isId = $search !== '' && ctype_digit($search);
+        $perPage    = min(max((int) $request->integer('per_page', 24), 1), 100);
+        $isId       = $search !== '' && ctype_digit($search);
 
-        // B2: оператор поиска через config
         $searchOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
 
         // Логика поиска по ID:
@@ -43,9 +56,7 @@ class MediaController extends AdminController
         $media = Media::query()
             ->where('type', Media::TYPE_IMAGE)
             ->when($actualCollection !== 'all', fn($q) => $q->where('collection', $actualCollection))
-            ->when($search !== '' && !$isId, function ($q) use ($search, $searchOperator) {
-                $q->where('file_name', $searchOperator, "%{$search}%");
-            })
+            ->when($search !== '' && !$isId, fn($q) => $q->where('file_name', $searchOperator, "%{$search}%"))
             ->when($isId, function ($q) use ($search) {
                 $q->where('id', (int) $search)
                     ->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
@@ -54,20 +65,7 @@ class MediaController extends AdminController
             ->paginate($perPage);
 
         return response()->json([
-            'data' => $media->map(fn(Media $m) => [
-                'id'            => $m->id,
-                'file_name'     => $m->file_name,
-                'disk_path'     => $m->disk_path,
-                'url'           => $m->url,
-                'thumb_url'     => $m->getVariantUrl('thumb'),
-                'sm_url'        => $m->getVariantUrl('sm'),
-                'lg_url'        => $m->getVariantUrl('lg'),
-                'collection'    => $m->collection,
-                'is_processing' => $m->type === Media::TYPE_IMAGE && empty($m->variants),
-                'size'          => $m->size,
-                'mime_type'     => $m->mime_type,
-                'created_at'    => $m->created_at?->toIso8601String(),
-            ]),
+            'data'             => MediaListItemResource::collection($media->getCollection())->resolve(request()),
             'meta' => [
                 'current_page' => $media->currentPage(),
                 'last_page'    => $media->lastPage(),
@@ -76,9 +74,9 @@ class MediaController extends AdminController
                 'from'         => $media->firstItem(),
                 'to'           => $media->lastItem(),
             ],
-            'collection' => $actualCollection,
+            'collection'       => $actualCollection,
             'collection_label' => $collectionEnum->label(),
-            'crop_rules' => $this->getCropRules($actualCollection),
+            'crop_rules'       => $this->getCropRules($actualCollection),
         ]);
     }
 
@@ -102,44 +100,16 @@ class MediaController extends AdminController
 
     public function show(Media $media): JsonResponse
     {
-        $variants = [];
-        if (!empty($media->variants)) {
-            $config = config("media.collections.{$media->collection}.variants", []);
-            foreach ($media->variants as $key => $path) {
-                $variants[] = [
-                    'key'    => $key,
-                    'url'    => Storage::url($path),
-                    'size'   => $config[$key]['size'] ?? '—',
-                    'fit'    => $config[$key]['fit'] ?? '—',
-                    'format' => $config[$key]['format'] ?? '—',
-                ];
-            }
-        }
-
-        $collectionEnum = MediaCollection::tryFrom($media->collection);
-
         return response()->json([
-            'data' => [
-                'id'                => $media->id,
-                'file_name'         => $media->file_name,
-                'collection'        => $media->collection,
-                'collection_label'  => $collectionEnum?->label() ?? $media->collection,
-                'size'              => $media->size,
-                'mime_type'         => $media->mime_type,
-                'created_at'        => $media->created_at?->toIso8601String(),
-                'variants'          => $variants,
-                'is_processing'     => empty($media->variants),
-                'lg_url'            => $media->getVariantUrl('lg'),
-                'thumb_url'         => $media->getVariantUrl('thumb'),
-            ]
+            'data' => (new MediaDetailResource($media))->resolve(request()),
         ]);
     }
 
     /**
      * Загрузка файлов.
      *
-     * B3: добавлена 'image' rule — проверяет РЕАЛЬНЫЙ mime, а не расширение.
-     * Раньше можно было залить .php переименованный в .jpg.
+     * B3: UploadMediaRequest добавлен 'image' rule — проверяет РЕАЛЬНЫЙ mime,
+     * а не расширение. Раньше можно было залить .php переименованный в .jpg.
      */
     public function upload(UploadMediaRequest $request): JsonResponse
     {
@@ -175,20 +145,20 @@ class MediaController extends AdminController
             $loggableMedia = $count === 1 ? Media::find($uploadedIds[0]) : null;
 
             AdminLog::record($actionName, $loggableMedia, $admin, null, [
-                'status' => 'created',
-                'count' => $count,
-                'uploaded_by' => $admin->id,
+                'status'       => 'created',
+                'count'        => $count,
+                'uploaded_by'  => $admin->id,
                 'context' => [
                     'collection' => $collection,
-                    'media_ids' => array_slice($uploadedIds, 0, 100),
-                    'admin_id' => $admin->id
-                ]
+                    'media_ids'  => array_slice($uploadedIds, 0, 100),
+                    'admin_id'   => $admin->id,
+                ],
             ]);
         }
 
         Cache::forget('admin_media_counts');
 
-        return response()->json(['message' => 'Загружено файлов: ' . count($uploadedIds)]);
+        return $this->message('Загружено файлов: ' . count($uploadedIds));
     }
 
     public function destroy(Media $media, Request $request): JsonResponse
@@ -196,36 +166,32 @@ class MediaController extends AdminController
         $admin = $request->user();
 
         $before = [
-            'file_name' => $media->file_name,
+            'file_name'  => $media->file_name,
             'collection' => $media->collection,
-            'size' => $media->size
+            'size'       => $media->size,
         ];
 
-        $after = [
-            'status' => 'destroyed',
-            'deleted_by' => $admin->id,
+        AdminLog::record('media.delete', $media, $admin, $before, [
+            'status'      => 'destroyed',
+            'deleted_by'  => $admin->id,
             'context' => [
-                'media_id' => $media->id,
-                'file_name' => $media->file_name,
-                'admin_id' => $admin->id
-            ]
-        ];
+                'media_id'   => $media->id,
+                'file_name'  => $media->file_name,
+                'admin_id'   => $admin->id,
+            ],
+        ]);
 
-        AdminLog::record('media.delete', $media, $admin, $before, $after);
         $media->safeDelete();
 
         Cache::forget('admin_media_counts');
 
-        return response()->json(['message' => 'Файл удален']);
+        return $this->message('Файл удален');
     }
 
     public function bulkDelete(BulkDeleteMediaRequest $request): JsonResponse
     {
         $admin = $request->user();
-
-        $validated = $request->validated();
-
-        $mediaIds = $validated['ids'];
+        $mediaIds = $request->validated()['ids'];
 
         $medias = Media::whereIn('id', $mediaIds)->get();
         $deletedCount = 0;
@@ -236,19 +202,23 @@ class MediaController extends AdminController
         }
 
         AdminLog::record('media.delete_bulk', null, $admin, null, [
-            'status' => 'destroyed',
-            'count' => $deletedCount,
-            'deleted_by' => $admin->id,
+            'status'      => 'destroyed',
+            'count'       => $deletedCount,
+            'deleted_by'  => $admin->id,
             'context' => [
                 'media_ids' => array_slice($mediaIds, 0, 100),
-                'admin_id' => $admin->id
-            ]
+                'admin_id'  => $admin->id,
+            ],
         ]);
 
         Cache::forget('admin_media_counts');
 
-        return response()->json(['message' => "Удалено файлов: {$deletedCount}"]);
+        return $this->message("Удалено файлов: {$deletedCount}");
     }
+
+    // ============================================
+    // ХЕЛПЕРЫ
+    // ============================================
 
     private function getCropRules(string $collection): array
     {
@@ -274,4 +244,4 @@ class MediaController extends AdminController
             'variants'      => $variants,
         ];
     }
-}
+} 

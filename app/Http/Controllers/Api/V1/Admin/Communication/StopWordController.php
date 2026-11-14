@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Moderation\ApplyBulkStopWordRequest;
 use App\Http\Requests\Api\V1\Admin\Moderation\StoreBulkStopWordsRequest;
 use App\Http\Requests\Api\V1\Admin\Moderation\UpdateStopWordRequest;
+use App\Http\Resources\Api\V1\Admin\Communication\StopWordResource;
 use App\Models\StopWord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,10 +18,17 @@ use Illuminate\Support\Facades\Cache;
  *
  * Архитектура:
  *  - Controller (HTTP-слой): валидация (FormRequest), resolution модели + 404,
- *    форматирование ответа (список/счётчики/сообщения для тостов)
+ *    форматирование ответа (через StopWordResource), тосты для UI
  *  - ModerateStopWordAction (бизнес-логика): CUD-операции над stop_words,
- *    AdminLog, сброс кэша stop_words_active (используется ContentFilter-сервисом в рантайме)
+ *    AdminLog, сброс кэша stop_words_active (используется ContentFilterService
+ *    в рантайме при проверке сообщений)
  *  - Поиск по ID: искомое слово всегда первым (через ORDER BY CASE)
+ *
+ * Примечание про cross-domain import: ModerateStopWordAction лежит в
+ * App\Actions\V1\Admin\Moderation\ (а не Communication), потому что
+ * семантически это модерационная операция. Stop-word controller физически
+ * в Communication секции, но использует Moderation Action — это нормально,
+ * домены могут пересекаться на уровне бизнес-операций.
  */
 class StopWordController extends AdminController
 {
@@ -36,7 +44,7 @@ class StopWordController extends AdminController
         $searchOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
         $isId           = $search !== '' && ctype_digit($search);
 
-        $query = StopWord::query()
+        $words = StopWord::query()
             ->when($search !== '', function ($q) use ($search, $searchOperator, $isId) {
                 $q->where(function ($q) use ($search, $searchOperator, $isId) {
                     $q->where('word', $searchOperator, "%{$search}%");
@@ -47,27 +55,13 @@ class StopWordController extends AdminController
             })
             ->when($categoryFilter !== 'all', fn($q) => $q->where('category', $categoryFilter))
             ->when($actionFilter !== 'all',   fn($q) => $q->where('action', $actionFilter))
-            ->when($statusFilter !== 'all',  fn($q) => $q->where('is_active', $statusFilter === 'active'));
-
-        // При поиске по ID — искомая запись всегда первой
-        $query->when($isId, function ($q) use ($search) {
-            $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-        })
+            ->when($statusFilter !== 'all',   fn($q) => $q->where('is_active', $statusFilter === 'active'))
+            ->when($isId, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
             ->latest('created_at')
-            ->latest('id');
+            ->latest('id')
+            ->paginate($perPage, ['*'], 'page', $page);
 
-        $words = $query->paginate($perPage, ['*'], 'page', $page);
-
-        return response()->json([
-            'data' => $words->map(fn(StopWord $w) => $this->formatWord($w)),
-            'meta' => [
-                'current_page' => $words->currentPage(),
-                'last_page'    => $words->lastPage(),
-                'per_page'     => $words->perPage(),
-                'total'        => $words->total(),
-                'from'         => $words->firstItem(),
-                'to'           => $words->lastItem(),
-            ],
+        return $this->paginated($words, StopWordResource::class, [
             'counts' => $this->getCounts(),
         ]);
     }
@@ -90,18 +84,20 @@ class StopWordController extends AdminController
         $result = $action->storeBulk($request->user(), $request->validated());
 
         if ($result === null) {
-            return response()->json([
-                'message'       => 'Нечего сохранять: поле пустое!',
+            return $this->message('Нечего сохранять: поле пустое!', 422, [
                 'created_count' => 0,
-            ], 422);
+            ]);
         }
 
-        return response()->json([
-            'message'         => $this->buildCreateMessage($result['created_count'], $result['duplicate_count'], $result['total_count']),
-            'created_count'   => $result['created_count'],
-            'duplicate_count' => $result['duplicate_count'],
-            'total_count'     => $result['total_count'],
-        ]);
+        return $this->message(
+            $this->buildCreateMessage($result['created_count'], $result['duplicate_count'], $result['total_count']),
+            200,
+            [
+                'created_count'   => $result['created_count'],
+                'duplicate_count' => $result['duplicate_count'],
+                'total_count'     => $result['total_count'],
+            ],
+        );
     }
 
     /**
@@ -114,22 +110,20 @@ class StopWordController extends AdminController
     public function update(UpdateStopWordRequest $request, int $id, ModerateStopWordAction $action): JsonResponse
     {
         $word = StopWord::find($id);
-        if (!$word) {
-            return response()->json(['message' => 'Слово не найдено'], 404);
+        if (! $word) {
+            return $this->notFound('Слово');
         }
 
         try {
             $action->update($word, $request->user(), $request->validated());
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
-            return response()->json([
-                'message' => 'Такое слово уже существует в базе.',
-                'errors'  => ['word' => ['Это слово уже есть в справочнике.']],
-            ], 422);
+            return $this->message('Такое слово уже существует в базе.', 422, [
+                'errors' => ['word' => ['Это слово уже есть в справочнике.']],
+            ]);
         }
 
-        return response()->json([
-            'message' => 'Слово обновлено!',
-            'data'    => $this->formatWord($word),
+        return $this->message('Слово обновлено!', 200, [
+            'data' => new StopWordResource($word),
         ]);
     }
 
@@ -139,14 +133,13 @@ class StopWordController extends AdminController
     public function toggleActive(Request $request, int $id, ModerateStopWordAction $action): JsonResponse
     {
         $word = StopWord::find($id);
-        if (!$word) {
-            return response()->json(['message' => 'Слово не найдено'], 404);
+        if (! $word) {
+            return $this->notFound('Слово');
         }
 
         $action->toggleActive($word, $request->user());
 
-        return response()->json([
-            'message'   => 'Статус изменен',
+        return $this->message('Статус изменен', 200, [
             'is_active' => $word->is_active,
         ]);
     }
@@ -157,13 +150,13 @@ class StopWordController extends AdminController
     public function destroy(Request $request, int $id, ModerateStopWordAction $action): JsonResponse
     {
         $word = StopWord::find($id);
-        if (!$word) {
-            return response()->json(['message' => 'Слово не найдено'], 404);
+        if (! $word) {
+            return $this->notFound('Слово');
         }
 
         $action->destroy($word, $request->user());
 
-        return response()->json(['message' => 'Слово удалено']);
+        return $this->message('Слово удалено');
     }
 
     /**
@@ -186,9 +179,7 @@ class StopWordController extends AdminController
             'delete'     => 'удалено',
         ];
 
-        return response()->json([
-            'message' => "Массовое действие применено: {$labels[$bulkAction]} — {$count} шт.",
-        ]);
+        return $this->message("Массовое действие применено: {$labels[$bulkAction]} — {$count} шт.");
     }
 
     // ============================================
@@ -203,35 +194,13 @@ class StopWordController extends AdminController
      */
     private function buildCreateMessage(int $created, int $duplicates, int $total): string
     {
-        // Ничего не добавилось — все дубли
         if ($created === 0) {
             return "Все {$total} слов уже существуют в базе";
         }
-
-        // Все добавились новые (дубликатов нет)
         if ($duplicates === 0) {
             return "Добавлено новых слов: {$created}";
         }
-
-        // Часть добавилась, часть пропущена — показываем обе цифры
         return "Добавлено новых слов: {$created} · Пропущено дубликатов: {$duplicates}";
-    }
-
-    private function formatWord(StopWord $w): array
-    {
-        $actionBadge = $w->actionBadge;
-        return [
-            'id'            => $w->id,
-            'word'          => $w->word,
-            'category'      => $w->category->value,
-            'category_label' => $w->category->label(),
-            'action'        => $w->action->value,
-            'action_label'  => $w->action->label(),
-            'action_variant' => $actionBadge['variant'],
-            'replacement'   => $w->replacement,
-            'is_active'     => (bool) $w->is_active,
-            'created_at'    => $w->created_at?->toIso8601String(),
-        ];
     }
 
     private function getCounts(): array
@@ -248,4 +217,4 @@ class StopWordController extends AdminController
             ];
         });
     }
-}
+} 

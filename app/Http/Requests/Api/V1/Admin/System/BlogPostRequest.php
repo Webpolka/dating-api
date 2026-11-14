@@ -43,4 +43,5 @@ class BlogPostRequest extends FormRequest
             'cover_media_id.exists' => 'Выбранное изображение не существует в хранилище',
         ];
     }
+    
 }

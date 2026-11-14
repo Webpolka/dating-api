@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Admin\Finance;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\Finance\StoreSubscriptionPlanRequest;
 use App\Http\Requests\Api\V1\Admin\Finance\UpdateSubscriptionPlanRequest;
+use App\Http\Resources\Api\V1\Admin\Finance\SubscriptionPlanResource;
 use App\Models\AdminLog;
 use App\Models\SubscriptionPlan;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,14 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Тарифы и подписки (Premium / VIP).
  *
- * Логика из ManageSubscriptionPlansAction залита прямо в методы.
+ * Логика из ManageSubscriptionPlansAction залита прямо в методы (это OK —
+ * операции простые, без транзакций/каскадов).
+ *
+ * Slug — UNIQUE constraint в БД. При создании/обновлении ловим
+ * QueryException с кодом 23505 (unique_violation) → 422.
+ *
+ * Cache: admin_plan_counts (60 сек). Инвалидация через clearCache() после
+ * каждого mutation (store / update / toggleActive).
  */
 class SubscriptionPlanController extends AdminController
 {
@@ -36,15 +44,13 @@ class SubscriptionPlanController extends AdminController
                     }
                 });
             })
-            ->when($isId, function ($q) use ($search) {
-                $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]);
-            })
+            ->when($isId, fn($q) => $q->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [(int) $search]))
             ->orderBy('sort_order')
             ->orderBy('id', 'desc')
             ->get();
 
         return response()->json([
-            'data'   => $plans->map(fn(SubscriptionPlan $p) => $this->formatPlan($p)),
+            'data'   => SubscriptionPlanResource::collection($plans)->resolve($request),
             'counts' => $this->getCounts(),
         ]);
     }
@@ -54,6 +60,7 @@ class SubscriptionPlanController extends AdminController
         $admin = $request->user();
         $data  = $request->validated();
 
+        // Нормализация: пустые строки → null (для nullable-полей).
         $data['currency']           = 'RUB';
         $data['old_price']          = !empty($data['old_price']) ? $data['old_price'] : null;
         $data['apple_product_id']   = $data['apple_product_id'] ?: null;
@@ -63,10 +70,11 @@ class SubscriptionPlanController extends AdminController
             $plan = SubscriptionPlan::create($data);
         } catch (\Illuminate\Database\QueryException $e) {
             if ($e->getCode() === '23505') {
-                return response()->json([
-                    'message' => 'Тариф с таким slug уже существует.',
-                    'errors'   => ['slug' => ['Slug «' . $data['slug'] . '» уже занят.']],
-                ], 422);
+                return $this->message(
+                    'Тариф с таким slug уже существует.',
+                    422,
+                    ['errors' => ['slug' => ['Slug «' . $data['slug'] . '» уже занят.']]],
+                );
             }
             throw $e;
         }
@@ -75,85 +83,87 @@ class SubscriptionPlanController extends AdminController
             'status'  => 'created',
             'context' => [
                 'plan_id'       => $plan->id,
-                'name'           => $plan->name,
-                'tier'           => $plan->tier,
-                'price'           => $plan->price,
-                'duration_days'  => $plan->duration_days,
-                'admin_id'       => $admin->id,
+                'name'          => $plan->name,
+                'tier'          => $plan->tier,
+                'price'         => $plan->price,
+                'duration_days' => $plan->duration_days,
+                'admin_id'      => $admin->id,
             ],
         ]);
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Тариф создан', 'data' => $this->formatPlan($plan)]);
+        return $this->message('Тариф создан', 200, [
+            'data' => new SubscriptionPlanResource($plan),
+        ]);
     }
 
     public function update(UpdateSubscriptionPlanRequest $request, $id): JsonResponse
     {
         $admin = $request->user();
         $plan  = SubscriptionPlan::find((int) $id);
-        if (!$plan) {
-            return response()->json(['message' => 'Тариф не найден'], 404);
-        }
+        if (!$plan) return $this->notFound('Тариф');
 
         $data = $request->validated();
 
+        // Та же нормализация, что в store().
         $data['old_price']          = !empty($data['old_price']) ? $data['old_price'] : null;
         $data['apple_product_id']   = $data['apple_product_id'] ?: null;
         $data['google_product_id']   = $data['google_product_id'] ?: null;
 
         $before = [
             'name'           => $plan->getOriginal('name'),
-            'price'           => $plan->getOriginal('price'),
-            'old_price'       => $plan->getOriginal('old_price'),
+            'price'          => $plan->getOriginal('price'),
+            'old_price'      => $plan->getOriginal('old_price'),
             'duration_days'  => $plan->getOriginal('duration_days'),
         ];
 
         $plan->update($data);
 
         AdminLog::record('plan.update', $plan, $admin, $before, [
-            'name'           => $plan->name,
-            'price'           => $plan->price,
-            'old_price'       => $plan->old_price,
-            'duration_days'  => $plan->duration_days,
-            'context'         => [
+            'name'          => $plan->name,
+            'price'         => $plan->price,
+            'old_price'     => $plan->old_price,
+            'duration_days' => $plan->duration_days,
+            'context'       => [
                 'plan_id'  => $plan->id,
-                'name'      => $plan->name,
-                'admin_id'  => $admin->id,
+                'name'     => $plan->name,
+                'admin_id' => $admin->id,
             ],
         ]);
 
         $this->clearCache();
 
-        return response()->json(['message' => 'Тариф обновлен', 'data' => $this->formatPlan($plan)]);
+        return $this->message('Тариф обновлен', 200, [
+            'data' => new SubscriptionPlanResource($plan),
+        ]);
     }
 
     public function toggleActive(Request $request, $id): JsonResponse
     {
         $admin = $request->user();
         $plan  = SubscriptionPlan::find((int) $id);
-        if (!$plan) {
-            return response()->json(['message' => 'Тариф не найден'], 404);
-        }
+        if (!$plan) return $this->notFound('Тариф');
 
         $before = ['is_active' => $plan->getOriginal('is_active')];
         $plan->update(['is_active' => !$plan->is_active]);
 
         AdminLog::record('plan.toggle_active', $plan, $admin, $before, [
-            'is_active'  => $plan->is_active,
-            'context'    => [
+            'is_active' => $plan->is_active,
+            'context'   => [
                 'plan_id'  => $plan->id,
-                'name'      => $plan->name,
-                'admin_id'  => $admin->id,
+                'name'     => $plan->name,
+                'admin_id' => $admin->id,
             ],
         ]);
 
         $this->clearCache();
 
-        return response()->json([
-            'message'   => $plan->is_active ? 'Тариф активирован' : 'Тариф скрыт',
-            'is_active' => $plan->is_active,
-        ]);
+        return $this->message(
+            $plan->is_active ? 'Тариф активирован' : 'Тариф скрыт',
+            200,
+            ['is_active' => $plan->is_active],
+        );
     }
 
     // ============================================
@@ -173,26 +183,5 @@ class SubscriptionPlanController extends AdminController
     private function clearCache(): void
     {
         Cache::forget('admin_plan_counts');
-    }
-
-    private function formatPlan(SubscriptionPlan $p): array
-    {
-        return [
-            'id'                => $p->id,
-            'tier'              => $p->tier,
-            'name'              => $p->name,
-            'slug'              => $p->slug,
-            'price'             => (float) $p->price,
-            'old_price'         => $p->old_price !== null ? (float) $p->old_price : null,
-            'currency'          => $p->currency,
-            'duration_days'     => (int) $p->duration_days,
-            'apple_product_id'  => $p->apple_product_id,
-            'google_product_id'  => $p->google_product_id,
-            'is_active'          => (bool) $p->is_active,
-            'sort_order'        => (int) $p->sort_order,
-            'created_at'        => $p->created_at?->toIso8601String(),
-            // B2: добавил updated_at — UI может показывать "последнее обновление"
-            'updated_at'        => $p->updated_at?->toIso8601String(),
-        ];
     }
 }

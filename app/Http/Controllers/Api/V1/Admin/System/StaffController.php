@@ -6,62 +6,63 @@ use App\Actions\V1\Admin\System\ManageStaffAction;
 use App\Http\Controllers\Api\V1\Admin\AdminController;
 use App\Http\Requests\Api\V1\Admin\System\BatchUpdateRolesRequest;
 use App\Http\Requests\Api\V1\Admin\System\PromoteUserRequest;
+use App\Http\Resources\Api\V1\Admin\System\StaffResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Управление сотрудниками админки (admin / moderator / support).
+ *
+ * Three operations:
+ *  - index — список текущих staff (с пагинацией, founders первыми).
+ *  - search — поиск обычных юзеров для повышения (autocomplete).
+ *  - promote/demote/batchUpdate — изменение ролей.
+ *
+ * Founders (id из APP_FOUNDERS) — защищены: их нельзя разжаловать или повысить
+ * (они уже admin). Founder ≠ role=admin — founder это admin-аккаунт с доп. защитой.
+ *
+ * Audit (кто кого повысил/понизил до какой роли) — в ManageStaffAction.
+ */
 class StaffController extends AdminController
 {
     /**
-     * GET /api/admin/staff
-     * Список текущих сотрудников (с пагинацией)
+     * GET /api/admin/staff — список сотрудников (с пагинацией).
      */
     public function index(Request $request): JsonResponse
     {
         $founders = config('app.founders', []);
 
-        // Сортировка: сначала founders, потом по ID
+        // Сортировка: сначала founders, потом по ID.
         $founderCase = !empty($founders)
             ? "CASE WHEN id IN (" . implode(',', array_map('intval', $founders)) . ") THEN 0 ELSE 1 END"
             : "1";
 
         $staff = User::withTrashed()
             ->whereNot('role', User::ROLE_USER)
-            ->with(['photos' => fn($q) => $q->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb'])->orderByDesc('is_primary')->limit(1)])
+            ->withAvatar()
             ->orderByRaw($founderCase)
             ->orderBy('id', 'asc')
             ->paginate(20);
 
-        // Форматируем данные для фронтенда
-        $staff->getCollection()->transform(function (User $user) use ($request, $founders) {
-            return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                // B3: отдаём ISO — фронт сам отформатирует через formatDateTime.
-                // Это дата СОЗДАНИЯ юзера (registration), а не "дата назначения"
-                // (роль может меняться много раз). Подпись в UI — "Дата регистрации".
-                'created_at' => $user->created_at?->toIso8601String(),
-                'avatar_url' => $user->avatar_url,
-                'is_online' => $user->is_online,
-                'is_founder' => in_array($user->id, $founders, true),
-                'is_self' => $user->id === $request->user()->id,
-                // Поля для UserBadge
-                'status' => $user->status,
-                'deleted_at' => $user->deleted_at,
-                'has_active_premium' => $user->has_active_premium,
-                'has_active_vip' => $user->has_active_vip,
-                'is_verified' => $user->is_verified,
-            ];
-        });
+        // is_self вычисляется в Resource через request()->user()->id — не надо
+        // transform здесь. Resource::collection сам вызовет toArray с request.
 
-        return response()->json($staff);
+        return response()->json([
+            'data' => StaffResource::collection($staff->getCollection())->resolve($request),
+            'meta' => [
+                'current_page' => $staff->currentPage(),
+                'last_page'    => $staff->lastPage(),
+                'per_page'     => $staff->perPage(),
+                'total'        => $staff->total(),
+                'from'         => $staff->firstItem(),
+                'to'           => $staff->lastItem(),
+            ],
+        ]);
     }
 
     /**
-     * GET /api/admin/staff/search?search=...
-     * Поиск обычных юзеров для повышения
+     * GET /api/admin/staff/search?search=... — поиск обычных юзеров для повышения.
      */
     public function search(Request $request): JsonResponse
     {
@@ -75,119 +76,109 @@ class StaffController extends AdminController
         $isId = ctype_digit($search);
 
         $candidates = User::excludeStaff()
-            ->where(function ($q) use ($searchOperator, $search, $isId) {
-                if ($isId) {
-                    $q->where('id', (int) $search);
-                } else {
-                    $q->where('name', $searchOperator, "%{$search}%")
-                        ->orWhere('email', $searchOperator, "%{$search}%");
-                }
-            })
-            ->with(['photos' => fn($q) => $q->select(['id', 'user_id', 'is_primary', 'status', 'path_thumb'])->orderByDesc('is_primary')->limit(1)])
+            ->when($isId, fn($q) => $q->where('id', (int) $search))
+            ->when(!$isId, fn($q) => $q->where(function ($q) use ($searchOperator, $search) {
+                $q->where('name', $searchOperator, "%{$search}%")
+                    ->orWhere('email', $searchOperator, "%{$search}%");
+            }))
+            ->withAvatar()
             ->withTrashed()
             ->limit(10)
-            ->get(['id', 'name', 'email', 'status', 'premium_expires_at', 'vip_expires_at', 'last_seen', 'is_verified', 'deleted_at']);
+            ->get();
 
-        $candidates->transform(function (User $user) {
-            return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'avatar_url' => $user->avatar_url,
-                'is_online' => $user->is_online,
-                'status' => $user->status,
-                'deleted_at' => $user->deleted_at,
-                'has_active_premium' => $user->has_active_premium,
-                'has_active_vip' => $user->has_active_vip,
-                'is_verified' => $user->is_verified,
-            ];
-        });
-
-        return response()->json(['data' => $candidates]);
+        // В search нет is_founder/is_self — это не staff, а кандидаты.
+        // Возвращаем упрощённый inline-формат (как в старом коде).
+        return response()->json([
+            'data' => $candidates->map(fn(User $user) => [
+                'id'                 => $user->id,
+                'name'               => $user->name,
+                'email'              => $user->email,
+                'avatar_url'         => $user->avatar_url,
+                'is_online'          => $user->is_online,
+                'status'             => $user->status,
+                'deleted_at'         => $user->deleted_at?->toIso8601String(),
+                'has_active_premium' => $user->has_active_premium ?? false,
+                'has_active_vip'     => $user->has_active_vip ?? false,
+                'is_verified'        => $user->is_verified ?? false,
+            ]),
+        ]);
     }
 
     /**
-     * POST /api/admin/staff/{userId}/promote
+     * POST /api/admin/staff/{userId}/promote — повысить юзера до staff-роли.
      *
-     * Аудит (кто кого повысил до какой роли) — в ManageStaffAction::promote().
+     * Audit (кто кого повысил до какой роли) — в ManageStaffAction::promote().
      */
     public function promote(PromoteUserRequest $request, int $userId, ManageStaffAction $action): JsonResponse
     {
         $admin = $request->user();
         $user = User::withTrashed()->find($userId);
         if (!$user) {
-            return response()->json(['message' => 'Пользователь не найден.'], 404);
+            return $this->notFound('Пользователь');
         }
 
         $founders = config('app.founders', []);
         if (in_array($user->id, $founders, true)) {
-            return response()->json(['message' => 'Владельцев проекта нельзя изменять!'], 403);
+            return $this->message('Владельцев проекта нельзя изменять!', 403);
         }
 
         $newRole = $request->input('role');
 
         $action->promote($user, $admin, $newRole);
 
-        return response()->json([
-            'message' => "{$user->name} повышен до «{$newRole}»!",
+        return $this->message("{$user->name} повышен до «{$newRole}»!", 200, [
             'user' => [
-                'id' => $user->id,
+                'id'   => $user->id,
                 'name' => $user->name,
                 'role' => $user->role,
-            ]
+            ],
         ]);
     }
 
     /**
-     * POST /api/admin/staff/{userId}/demote
+     * POST /api/admin/staff/{userId}/demote — разжаловать staff в обычные юзеры.
      *
-     * Аудит — в ManageStaffAction::demote().
+     * Audit — в ManageStaffAction::demote().
      */
     public function demote(Request $request, int $userId, ManageStaffAction $action): JsonResponse
     {
         $admin = $request->user();
         $user = User::withTrashed()->find($userId);
         if (!$user) {
-            return response()->json(['message' => 'Пользователь не найден.'], 404);
+            return $this->notFound('Пользователь');
         }
 
         $founders = config('app.founders', []);
         if (in_array($user->id, $founders, true)) {
-            return response()->json(['message' => 'Владельцев проекта нельзя разжаловать!'], 403);
+            return $this->message('Владельцев проекта нельзя разжаловать!', 403);
         }
 
         if ($user->id === $admin->id) {
-            return response()->json(['message' => 'Нельзя разжаловать самого себя!'], 403);
+            return $this->message('Нельзя разжаловать самого себя!', 403);
         }
 
         $action->demote($user, $admin);
 
-        return response()->json([
-            'message' => "{$user->name} разжалован в обычные юзеры."
-        ]);
+        return $this->message("{$user->name} разжалован в обычные юзеры.");
     }
 
     /**
-     * PATCH /api/admin/staff/batch-update
-     * Массовое сохранение ролей
+     * PATCH /api/admin/staff/batch-update — массовое сохранение ролей.
      *
-     * B2: транзакция + аудит (по одной записи на изменение) —
-     * в ManageStaffAction::batchUpdate().
+     * B2: транзакция + аудит (по одной записи на изменение) — в ManageStaffAction::batchUpdate().
      */
     public function batchUpdate(BatchUpdateRolesRequest $request, ManageStaffAction $action): JsonResponse
     {
         $updatedCount = $action->batchUpdate($request->input('roles', []), $request->user());
 
         if ($updatedCount > 0) {
-            return response()->json([
-                'message' => "Успешно сохранено! Ролей изменено: {$updatedCount}",
-                'updated_count' => $updatedCount
+            return $this->message("Успешно сохранено! Ролей изменено: {$updatedCount}", 200, [
+                'updated_count' => $updatedCount,
             ]);
         }
 
-        return response()->json([
-            'message' => 'Изменений для сохранения нет.',
-            'updated_count' => 0
+        return $this->message('Изменений для сохранения нет.', 200, [
+            'updated_count' => 0,
         ]);
     }
-}
+} 
