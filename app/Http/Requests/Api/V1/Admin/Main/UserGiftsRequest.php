@@ -3,35 +3,35 @@
 namespace App\Http\Requests\Api\V1\Admin\Main;
 
 /**
- * Параметры пагинации для таба «Подарки» пользователя.
+ * Параметры для таба «Подарки» пользователя.
  *
- * GET /api/admin/users/{user}/gifts?sent_page=1&received_page=2
+ * GET /api/admin/users/{user}/gifts?filter=all&page=2
  *
- * В одном запросе две независимые пагинации:
- *   - sent     — подарки, отправленные пользователем (sender_id = userId)
- *   - received — подарки, полученные пользователем (receiver_id = userId)
+ * Единый список подарков (UserGift) с фильтром по направлению:
+ *   all       (дефолт) — и отправленные, и полученные
+ *   sent               — только отправленные юзером (sender_id = userId)
+ *   received           — только полученные юзером (receiver_id = userId)
  *
- * Паттерн идентичен UserReportsRequest (made/received).
+ * Паттерн идентичен UserDiariesRequest (rubric-фильтр): single-list с
+ * кнопками-фильтрами, одна пагинация. Раньше тут был composite sent/received
+ * с двумя пагинациями — но blade-эталон использует именно single-list с
+ * фильтром (оператору удобнее переключать направление, чем скроллить две
+ * колонки). withTrashed() на бэке — чтобы видеть подарки, скрытые юзером.
  */
 class UserGiftsRequest extends UserListRequest
 {
     public function rules(): array
     {
         return [
-            'sent_page'     => ['nullable', 'integer', 'min:1'],
-            'received_page' => ['nullable', 'integer', 'min:1'],
+            'filter' => ['nullable', 'in:all,sent,received'],
+            'page'   => ['nullable', 'integer', 'min:1'],
         ];
     }
 
-    public function sentPage(int $default = 1): int
+    public function filter(string $default = 'all'): string
     {
         $validated = $this->validated();
-        return isset($validated['sent_page']) ? (int) $validated['sent_page'] : $default;
-    }
-
-    public function receivedPage(int $default = 1): int
-    {
-        $validated = $this->validated();
-        return isset($validated['received_page']) ? (int) $validated['received_page'] : $default;
+        $filter = isset($validated['filter']) ? (string) $validated['filter'] : $default;
+        return in_array($filter, ['all', 'sent', 'received'], true) ? $filter : $default;
     }
 }

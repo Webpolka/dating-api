@@ -145,13 +145,13 @@ Route::middleware(['web'])->group(function () {
         Route::get('/users/{user}/blocks', [UserController::class, 'blocks']);
         Route::post('/users/{user}/blocks/unblock', [UserController::class, 'unblockBlock'])
             ->middleware('throttle:admin-user-actions');
-        Route::get('/users/{user}/photos', [UserController::class, 'photos']);
 
         // === USER TABS: пер-юзер листинги (UserListingsController) ===
         // Read-only списки для табов страницы /users/{id}. Мутации — через
         // глобальные разделы модерации (там же throttle и RBAC).
         // Роли — зеркально глобальным аналогам: фото/дневники/комменты/
         // знакомства/чаты — moderator+admin (как их разделы модерации).
+        Route::get('/users/{user}/photos', [UserListingsController::class, 'photos']);
         Route::get('/users/{user}/photo-comments', [UserListingsController::class, 'photoComments']);
         Route::get('/users/{user}/diaries', [UserListingsController::class, 'diaries']);
         Route::get('/users/{user}/diary-comments', [UserListingsController::class, 'diaryComments']);
@@ -379,7 +379,7 @@ Route::middleware(['web'])->group(function () {
         // Финансы, карты, промокоды, рассылки, аудиторские данные —
         // зеркально глобальным аналогам (transactions/gifts/broadcasts/
         // audit-logs доступны только admin).
-        Route::get('/users/{user}/transactions', [UserListingsController::class, 'transactions']);
+        Route::get('/users/{user}/finances', [UserListingsController::class, 'finances']);
         Route::get('/users/{user}/gifts', [UserListingsController::class, 'gifts']);
         Route::get('/users/{user}/broadcasts', [UserListingsController::class, 'broadcasts']);
         Route::get('/users/{user}/admin-logs', [UserListingsController::class, 'adminLogs']);

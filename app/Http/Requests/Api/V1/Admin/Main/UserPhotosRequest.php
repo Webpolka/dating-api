@@ -5,41 +5,24 @@ namespace App\Http\Requests\Api\V1\Admin\Main;
 /**
  * Параметры для таба «Фото» пользователя.
  *
- * GET /api/admin/users/{user}/photos?status=pending&page=2
+ * GET /api/admin/users/{user}/photos
  *
- * Один `page` (как в bans), в отличие от reports/blocks с двумя колонками:
- * фото — единый список, фильтруемый по `status`.
+ * Таб БЕЗ модерации — группировка по альбомам (один альбом = одна карточка).
+ * Без фильтра статусов и без пагинации (альбомов у юзера немного — все разом).
+ * Родительский UserListRequest даёт page/per_page, но метод photos() их не
+ * использует (отдаёт все альбомы целиком) — оставлены для совместимости с
+ * общей фабрикой useUserListing на фронте.
  *
- * `status` по умолчанию 'pending' — самое важное для модератора
- * (тот же дефолт, что в глобальной очереди GET /admin/photos).
- *
- * Варианты status:
- *   - pending    — ожидают модерации (status='pending', deleted_at IS NULL)
- *   - approved   — одобренные    (status='approved', deleted_at IS NULL)
- *   - rejected   — отклонённые   (status='rejected', deleted_at IS NULL)
- *   - quarantine — карантин      (deleted_at IS NOT NULL, любой status)
- *
- * Карантин ≠ status='rejected'. Карантин = soft-deleted (deleted_at IS NOT NULL).
- * См. PhotoController::getCounts() — та же логика подсчёта.
+ * Модерация фото живёт в глобальной очереди /moderation/photos (со статусами
+ * pending/approved/rejected/quarantine и масс-действиями). Здесь — только
+ * просмотр фото, сгруппированных по альбомам.
  */
 class UserPhotosRequest extends UserListRequest
 {
     public function rules(): array
     {
-        return array_merge(parent::rules(), [
-            'status' => ['nullable', 'in:pending,approved,rejected,quarantine'],
-        ]);
-    }
-
-    /**
-     * Текущий статус-фильтр с дефолтом и защитой от подделки.
-     */
-    public function status(string $default = 'pending'): string
-    {
-        $validated = $this->validated();
-        $status = isset($validated['status']) ? (string) $validated['status'] : $default;
-        return in_array($status, ['pending', 'approved', 'rejected', 'quarantine'], true)
-            ? $status
-            : $default;
+        // Без status-фильтра — таб без модерации. page/per_page наследуем от UserListRequest
+        // (не используются методом, но валидируются — на случай будущего расширения).
+        return parent::rules();
     }
 }

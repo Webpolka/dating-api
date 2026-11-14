@@ -3,38 +3,42 @@
 namespace App\Http\Requests\Api\V1\Admin\Main;
 
 /**
- * Параметры для таба «Комм. фото» пользователя.
+ * Параметры пагинации для таба «Комм. фото» пользователя.
  *
- * GET /api/admin/users/{user}/photo-comments?status=pending&page=2
+ * GET /api/admin/users/{user}/photo-comments?made_page=1&received_page=2
  *
- * Комментарии, НАПИСАННЫЕ пользователем (author = user).
+ * В одном запросе две независимые пагинации:
+ *   - made     — комментарии, НАПИСАННЫЕ пользователем (photo_comments.user_id = userId)
+ *   - received — комментарии под ФОТО пользователя (photo.user_id = userId,
+ *                автор — любой другой юзер)
  *
- * Варианты status:
- *   - all       — все (включая карантин)
- *   - pending   — ожидают модерации (status='pending', deleted_at IS NULL)
- *   - approved  — одобренные
- *   - rejected  — отклонённые
- *   - spam      — помеченные как спам
- *   - karantine — карантин (soft-deleted, deleted_at IS NOT NULL)
+ * Паттерн идентичен UserReportsRequest (made/received) и UserGiftsRequest
+ * (sent/received): нельзя использовать один `page` — иначе переключение
+ * одной колонки сбрасывало бы вторую.
  *
- * «Карантин» ≠ status='rejected' — та же семантика, что в
- * PhotoCommentController::getCounts() и табе «Фото».
+ * Фильтр статусов не нужен: обе колонки показывают всю историю «как есть»
+ * (включая карантин — soft-deleted), статус виден бейджем в каждой строке.
+ * Масс-фильтрация живёт в глобальной очереди модерации.
  */
 class UserPhotoCommentsRequest extends UserListRequest
 {
     public function rules(): array
     {
-        return array_merge(parent::rules(), [
-            'status' => ['nullable', 'in:all,pending,approved,rejected,spam,karantine'],
-        ]);
+        return [
+            'made_page'     => ['nullable', 'integer', 'min:1'],
+            'received_page' => ['nullable', 'integer', 'min:1'],
+        ];
     }
 
-    public function status(string $default = 'all'): string
+    public function madePage(int $default = 1): int
     {
         $validated = $this->validated();
-        $status = isset($validated['status']) ? (string) $validated['status'] : $default;
-        return in_array($status, ['all', 'pending', 'approved', 'rejected', 'spam', 'karantine'], true)
-            ? $status
-            : $default;
+        return isset($validated['made_page']) ? (int) $validated['made_page'] : $default;
+    }
+
+    public function receivedPage(int $default = 1): int
+    {
+        $validated = $this->validated();
+        return isset($validated['received_page']) ? (int) $validated['received_page'] : $default;
     }
 }

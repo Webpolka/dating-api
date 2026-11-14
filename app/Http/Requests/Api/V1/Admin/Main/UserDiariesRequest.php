@@ -5,42 +5,55 @@ namespace App\Http\Requests\Api\V1\Admin\Main;
 /**
  * Параметры для таба «Дневники» пользователя.
  *
- * GET /api/admin/users/{user}/diaries?status=all&trashed=without&page=2
+ * GET /api/admin/users/{user}/diaries?rubric=all&search=&page=2
  *
  * Дневники, НАПИСАННЫЕ пользователем (author = user).
+ * Всегда показывает soft-deleted (withTrashed) — карантин виден бейджем строки,
+ * как в старом blade-табе. Без отдельного фильтра по статусу: статус виден
+ * бейджем в каждой строке, масс-фильтрация остаётся в глобальном разделе модерации.
  *
- * status — зеркалит DiaryStatus enum:
- *   all | draft | pending | published | rejected
+ * rubric — фильтр по рубрике:
+ *   all  (дефолт) — все записи
+ *   none          — записи без рубрики (diary_rubric_id IS NULL)
+ *   <id>          — записи конкретной рубрики (только рубрики, в которых у юзера
+ *                   реально есть посты — список приходит отдельным полем `rubrics`
+ *                   в ответе, фронт рисует кнопки по нему)
  *
- * trashed — фильтр мягко-удалённых (та же семантика, что в
- * глобальном списке DiaryController::index()):
- *   without (дефолт) | with | only
+ * search — поиск по названию (ilike на pgsql, like на прочих) и по id,
+ *          если поисковый запрос — число. Debounce на фронте 300ms.
  */
 class UserDiariesRequest extends UserListRequest
 {
     public function rules(): array
     {
-        return array_merge(parent::rules(), [
-            'status'  => ['nullable', 'in:all,draft,pending,published,rejected'],
-            'trashed' => ['nullable', 'in:with,only,without'],
-        ]);
+        return [
+            'rubric' => ['nullable', 'string'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'page'   => ['nullable', 'integer', 'min:1'],
+        ];
     }
 
-    public function status(string $default = 'all'): string
+    /**
+     * Рубрика-фильтр. Возвращает 'all' | 'none' | (int) id.
+     * Числовую строку приводим к int — фронт шлёт id рубрики строкой из URL.
+     */
+    public function rubric(string $default = 'all')
     {
         $validated = $this->validated();
-        $status = isset($validated['status']) ? (string) $validated['status'] : $default;
-        return in_array($status, ['all', 'draft', 'pending', 'published', 'rejected'], true)
-            ? $status
-            : $default;
+        if (!isset($validated['rubric'])) {
+            return $default;
+        }
+        $rubric = (string) $validated['rubric'];
+        if ($rubric === 'all' || $rubric === 'none') {
+            return $rubric;
+        }
+        return is_numeric($rubric) ? (int) $rubric : $default;
     }
 
-    public function trashed(string $default = 'without'): string
+    public function search(): ?string
     {
         $validated = $this->validated();
-        $trashed = isset($validated['trashed']) ? (string) $validated['trashed'] : $default;
-        return in_array($trashed, ['with', 'only', 'without'], true)
-            ? $trashed
-            : $default;
+        $search = isset($validated['search']) ? trim((string) $validated['search']) : '';
+        return $search !== '' ? $search : null;
     }
 }
