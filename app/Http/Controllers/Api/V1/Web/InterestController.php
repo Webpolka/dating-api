@@ -30,8 +30,9 @@ class InterestController extends Controller
     public function index(): JsonResponse
     {
         $categories = InterestCategory::with(['interests' => function ($q) {
-            $q->select('id', 'name', 'slug', 'category_id', 'users_count')
-              ->orderBy('name');
+             $q->select('id', 'name', 'slug', 'category_id', 'users_count', 'search_boost')
+            ->orderByDesc('search_boost')
+            ->orderBy('name');
         }])
         ->select('id', 'name', 'slug', 'icon')
         ->ordered()
