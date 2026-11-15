@@ -31,6 +31,8 @@ use App\Http\Controllers\Api\V1\Admin\Moderation\DiaryController;
 use App\Http\Controllers\Api\V1\Admin\Moderation\DiaryCommentController;
 use App\Http\Controllers\Api\V1\Admin\Main\UserController;
 use App\Http\Controllers\Api\V1\Admin\Main\UserListingsController;
+use App\Http\Controllers\Api\V1\Admin\System\InterestCategoryController;
+use App\Http\Controllers\Api\V1\Admin\System\InterestController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -386,6 +388,30 @@ Route::middleware(['web'])->group(function () {
         Route::get('/users/{user}/cards', [UserListingsController::class, 'cards']);
         Route::get('/users/{user}/promocodes', [UserListingsController::class, 'promocodes']);
         Route::get('/users/{user}/auth-logs', [UserListingsController::class, 'authLogs']);
+
+
+                // === ИНТЕРЕСЫ: КАТЕГОРИИ ===
+        // Справочник категорий интересов (Хобби, Спорт, Музыка, ...).
+        // Предзаданы админом — юзер не может создавать свои интересы.
+        // При удалении категории её интересы → uncategorized (category_id=null).
+        Route::get('/interests/categories', [InterestCategoryController::class, 'index']);
+        Route::post('/interests/categories', [InterestCategoryController::class, 'store']);
+        Route::put('/interests/categories/{category}', [InterestCategoryController::class, 'update']);
+        Route::delete('/interests/categories/{category}', [InterestCategoryController::class, 'destroy']);
+
+        // === ИНТЕРЕСЫ ===
+        // CRUD + boost (подъём в выдаче) + bulk (delete / set_category).
+        // users_count обновляется триггером, в коде не трогаем.
+        Route::get('/interests/counts', [InterestController::class, 'counts']);
+        Route::get('/interests', [InterestController::class, 'index']);
+        Route::post('/interests', [InterestController::class, 'store']);
+        Route::get('/interests/{interest}', [InterestController::class, 'show']);
+        Route::put('/interests/{interest}', [InterestController::class, 'update']);
+        Route::delete('/interests/{interest}', [InterestController::class, 'destroy']);
+        Route::post('/interests/{interest}/boost', [InterestController::class, 'boost'])
+            ->middleware('throttle:admin-interest-actions');
+        Route::post('/interests/bulk', [InterestController::class, 'bulk']);
+
 
         // === SYSTEM LOGS ===
         // Технические логи Laravel могут содержать sensitive data (stack traces,

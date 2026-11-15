@@ -196,6 +196,24 @@ class RateLimitServiceProvider extends ServiceProvider
         });
 
 
+         // ------------------------------------------------------------
+        // ADMIN INTEREST ACTIONS: throttle для boost интересов
+        // ------------------------------------------------------------
+        // Лимит: 20 в минуту на admin_id. Буст выдачи — редкая операция,
+        // 20 в минуту достаточно (включая пакетный буст). Защита от
+        // случайного двойного клика.
+        RateLimiter::for('admin-interest-actions', function (Request $request) {
+            $adminId = $request->user()?->id ?? 'guest';
+            return Limit::perMinute(20)
+                ->by("admin:{$adminId}")
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Слишком много действий с интересами. Подождите минуту.',
+                    ], 429);
+                });
+        });
+
+
         // ------------------------------------------------------------
         // ADMIN BLOG ACTIONS: throttle для setFeatured
         // ------------------------------------------------------------
